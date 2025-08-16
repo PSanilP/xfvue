@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>xfVue.js 3.0.0</title>
+    <title>Refactor VUE 1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
 
@@ -19,7 +19,7 @@
                 <span>{{msg}}</span>
             </div>
             <div>
-                <input type="button" value="Increment Count" v-on:click="count++;s()" />
+                <input type="button" value="Increment Count" v-on:click="count++;s()"  v-on:load="console.log('btn loaded')"/>
                 <div>{{count}}</div>
                 <input type="number" v-model="count" />
             </div>
@@ -135,20 +135,17 @@
             function trackEffect(effect, parentScope) {
                 parentScope && parentScope.active && parentScope.effects.push(effect);
             }
-            const createDep = effects => {
-                const dep = new Set(effects);
-                dep.w = 0;
-                dep.n = 0;
-                return dep;
-            };
+
+            // Create a dependency set for effects
+            const createDep = effects => { const dep = new Set(effects); dep.w = 0; dep.n = 0; return dep; };
             const wasTracked = dep => (dep.w & trackOpBit) > 0;
             const newTracked = dep => (dep.n & trackOpBit) > 0;
             const targetMap = new WeakMap;
-            let trackStack = 0,
-                trackOpBit = 1;
+            let trackStack = 0;
+            let trackOpBit = 1;
             let activeEffect;
-            const MAP_KEY_ITERATE_KEY = Symbol(""),
-                ITERATE_KEY = Symbol("");
+            const MAP_KEY_ITERATE_KEY = Symbol("");
+            const ITERATE_KEY = Symbol("");
 
             // ReactiveEffect
             class ReactiveEffect {
@@ -221,21 +218,20 @@
 
             // Clean up dependencies for an effect
             function cleanupEffect(effect) {
-                const {
-                    deps
-                } = effect;
-                if (deps.length) {
-                    for (let i = 0; i < deps.length; i++) {
-                        deps[i].delete(effect);
-                    }
+                const { deps } = effect;
+                if (deps.length > 0) {
+                    for (const dep of deps) { dep.delete(effect); }
                     deps.length = 0;
                 }
             }
+
 
             // Stop an effect
             function stop(effect) {
                 effect.effect.stop();
             }
+
+            // Global tracking state
             let shouldTrack = true;
             const trackStackArray = [];
 
@@ -332,6 +328,7 @@
                     }
                 }
             }
+
             // Create a Set of Symbol properties that are not "arguments" or "caller"
             const symbolPropertyIsHidden = new Set(
                 Object.getOwnPropertyNames(Symbol)
@@ -539,30 +536,30 @@
             const forceEnabledAttrsRE = /^(spellcheck|draggable|form|list|type)$/;
 
             // bind Directive
-            const bindDirective = ({
-                el,
-                get,
-                arg,
-                modifiers
-            }) => {
-                let prevValue;
-                if (arg === "class") el._class = el.className;
-                const effectFn = () => {
-                    let value = get();
+            const bindDirective = ({ el, get, arg, modifiers }) => {
+                let previousValue;
+                // Preserve original class if binding to "class"
+                if (arg === "class") { el._class = el.className; }
+                const updateBinding = () => {
+                    const currentValue = get();
                     if (arg) {
-                        if (modifiers && modifiers.camel) arg = camelize(arg);
-                        applyBinding(el, arg, value, prevValue);
+                        const bindingKey = modifiers?.camel ? camelize(arg) : arg;
+                        applyBinding(el, bindingKey, currentValue, previousValue);
                     } else {
-                        for (const key in value) applyBinding(el, key, value[key], prevValue && prevValue[key]);
-                        if (prevValue) {
-                            for (const key in prevValue) {
-                                if (!value || !(key in value)) applyBinding(el, key, null);
+                        // Apply new bindings
+                        for (const key in currentValue) {
+                            applyBinding(el, key, currentValue[key], previousValue?.[key]);
+                        }
+                        // Remove old bindings that no longer exist
+                        if (previousValue) {
+                            for (const key in previousValue) {
+                                if (!(key in currentValue)) { applyBinding(el, key, null); }
                             }
                         }
                     }
-                    prevValue = value;
+                    previousValue = currentValue;
                 };
-                new ReactiveEffect(effectFn, null, el.scope).run();
+                new ReactiveEffect(updateBinding, null, el.scope).run();
             };
 
             // applyBinding
@@ -656,38 +653,52 @@
             };
 
             // onDirective
-            const onDirective = ({
-                el,
-                get,
-                exp,
-                arg,
-                modifiers
-            }) => {
+
+            const onDirective = ({ el, get, exp, arg, modifiers }) => {
                 if (!arg) return;
-                let handler = isSimplePathRE.test(exp) ? get(`(e => ${exp}(e))`) : get(`($event => { ${exp} })`);
-                if (arg === "mount") {
+
+                // Create the event handler from the expression
+                const isSimple = isSimplePathRE.test(exp);
+                let handler = get(isSimple ? `(e => ${exp}(e))` : `($event => { ${exp} })`);
+
+                // Handle lifecycle events
+                if (arg === "mount" || arg === "load") {
                     nextTick(handler);
-                } else if (arg === "unmount") {
+                    return;
+                }
+
+                if (arg === "unmount"|| arg === "unload") {
                     return () => handler();
-                } else {
-                    if (arg === "click" && modifiers) {
-                        if (modifiers.right) arg = "contextmenu";
-                        if (modifiers.middle) arg = "mouseup";
+                }
+
+                // Normalize mouse event modifiers
+                if (arg === "click" && modifiers) {
+                    if (modifiers.right) arg = "contextmenu";
+                    if (modifiers.middle) arg = "mouseup";
+                }
+
+                const rawHandler = handler;
+
+                // Wrap handler with key/modifier checks
+                handler = event => {
+                    if ("key" in event && !(hyphenate(event.key) in modifiers)) {
+                        return;
                     }
-                    const rawHandler = handler;
-                    handler = event => {
-                        if ("key" in event && !(hyphenate(event.key) in modifiers)) {
+
+                    for (const key in modifiers) {
+                        const modifierHandler = eventModifiers[key];
+                        if (modifierHandler && modifierHandler(event, modifiers)) {
                             return;
                         }
-                        for (const key in modifiers) {
-                            const modifierHandler = eventModifiers[key];
-                            if (modifierHandler && modifierHandler(event, modifiers)) return;
-                        }
-                        return rawHandler(event);
-                    };
-                    addEventListener(el, arg, handler, modifiers);
-                }
+                    }
+
+                    return rawHandler(event);
+                };
+
+                addEventListener(el, arg, handler, modifiers);
             };
+
+
 
             // textDirective
             const textDirective = ({
@@ -905,26 +916,26 @@
                 }) => el.removeAttribute("v-cloak")
             };
 
-            // Parse text into tokens
-            const parseText = text => {
-                if (!text.includes("{{")) return null;
+            // Parses a string containing {{ }} interpolations into text and expression tokens
+            const parseText = (text) => {
+                if (typeof text !== "string" || !text.includes("}}")) { return null; }
                 const tokens = [];
-                const re = /\{\{((?:.|\r?\n)+?)\}\}/g;
-                let lastIndex = 0,
-                    match;
-                while (match = re.exec(text)) {
-                    if (match.index > lastIndex) {
-                        tokens.push({
-                            type: "text",
-                            value: text.slice(lastIndex, match.index)
-                        });
+                const interpolationRegex = /\{\{((?:.|\r?\n)+?)\}\}/g;
+                let lastIndex = 0;
+                let match;
+                while ((match = interpolationRegex.exec(text)) !== null) {
+                    const matchStart = match.index;
+                    const matchEnd = matchStart + match[0].length;
+                    // Add preceding plain text as a token
+                    if (matchStart > lastIndex) {
+                        tokens.push({ type: "text", value: text.slice(lastIndex, matchStart) });
                     }
-                    tokens.push({
-                        type: "expression",
-                        value: match[1].trim()
-                    });
-                    lastIndex = match.index + match[0].length;
+                    // Add the interpolated expression as a token
+                    tokens.push({ type: "expression", value: match[1].trim() });
+                    lastIndex = matchEnd;
                 }
+
+                // Add any remaining text after the last match
                 if (lastIndex < text.length) {
                     tokens.push({
                         type: "text",
@@ -969,6 +980,7 @@
 
             // Scope
             class Scope {
+                // Constructor for Scope
                 constructor(el, data = {}, parentScope = null, availableDirectives) {
                     this.el = el;
                     this.el.scope = this;
@@ -978,11 +990,11 @@
                     this.availableDirectives = availableDirectives;
                     this.init();
                 }
-
+                // Evaluate an expression in the context of this scope
                 evaluate(exp, el) {
                     return evaluateExpression(this.data, exp, el);
                 }
-
+                // Initialize the scope by processing directives and attributes
                 init() {
                     const dataProxy = this.data;
                     const directiveAttributes = [];
@@ -998,7 +1010,7 @@
                             }
                         }
                     }
-
+                    // Sort directive attributes by their names to ensure consistent processing order
                     directiveAttributes.sort((a, b) => {
                         const order = ["cloak", "if", "for", "bind", "on", "model", "text", "html", "show"];
                         const aName = a.name.split(/[:.]/)[0];
@@ -1037,14 +1049,14 @@
                 teardown() {
                     this.effects.forEach(effect => effect.stop());
                 }
-            }
+            };
 
             // init
             const init = (initialData = {}) => {
                 let scopes = [];
                 const localDirectives = Object.assign({}, directives);
                 let appData = reactive(initialData);
-
+                // Create the main app object
                 const app = {
                     data(dataObject) {
                         appData = reactive(dataObject);
@@ -1085,10 +1097,11 @@
                 };
                 return app;
             };
+
+            // Export the xfvue object
             const currentScript = document.currentScript;
-            if (currentScript && currentScript.hasAttribute("init")) {
-                init().mount();
-            }
+            if (currentScript && currentScript.hasAttribute("init")) { init().mount(); }
+
             exports.createApp = init;
             exports.nextTick = nextTick;
             exports.reactive = reactive;
