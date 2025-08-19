@@ -3,25 +3,32 @@
 
 <head>
     <meta charset="utf-8">
-    <title>Refactor VUE 1</title>
+    <title>Refactored xfVUE - Complete & Functional</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
 
 </head>
 
 <body>
-    <div id="app" v-scope class="">
+    <div id="app" v-scope>
         <h1>Reactivity Tester</h1>
         <div>
-            <input type="text" v-model="msg" />
+            <input type="text" v-model="message" />
             <div>
                 <div>Model Value: </div>
-                <span>{{msg}}</span>
+                <span data-testid="msg-display">{{message}}</span>
             </div>
             <div>
-                <input type="button" value="Increment Count" v-on:click="count++;s()"  v-on:load="console.log('btn loaded')"/>
+                <input type="button" value="Increment Count" v-on:click="count++;logMessage()" v-on:load="console.log('btn loaded')" />
                 <div>{{count}}</div>
                 <input type="number" v-model="count" />
+            </div>
+            <div>
+                <p>Select element reactivity:</p>
+                <select v-model="selectedValue">
+                    <option v-for="option in options" v-bind:value="option.value">{{option.text}}</option>
+                </select>
+                <p>Selected value: {{selectedValue}}</p>
             </div>
         </div>
     </div>
@@ -30,614 +37,425 @@
         var xfvue = function (exports) {
             "use strict";
 
-            // Object utility functions
+            // --- Core Utilities ---
             const objectAssign = Object.assign;
             const hasOwnProperty = Object.prototype.hasOwnProperty;
             const hasOwn = (obj, key) => hasOwnProperty.call(obj, key);
             const isArray = Array.isArray;
-            const isMap = val => "[object Map]" === toRawType(val);
-            const isDate = val => "[object Date]" === toRawType(val);
-            const isString = val => "string" == typeof val;
-            const isSymbol = val => "symbol" == typeof val;
-            const isObject = val => null !== val && "object" == typeof val;
+            const isMap = val => toRawType(val) === "[object Map]";
+            const isDate = val => toRawType(val) === "[object Date]";
+            const isString = val => typeof val === "string";
+            const isSymbol = val => typeof val === "symbol";
+            const isObject = val => val !== null && typeof val === "object";
             const objectToString = Object.prototype.toString;
             const toRawType = val => objectToString.call(val);
             const isIntegerKey = val => isString(val) && "NaN" !== val && "-" !== val[0] && "" + parseInt(val, 10) === val;
-            const memoize = fn => {
+            const memoize = (fn) => {
                 const cache = Object.create(null);
-                return key => cache[key] || (cache[key] = fn(key));
+                return (key) => cache[key] || (cache[key] = fn(key));
             };
-            const kebabToCamelRE = /-(\w)/g;
-            const camelize = memoize(str => str.replace(kebabToCamelRE, ((match, char) => char ? char.toUpperCase() : "")));
-            const camelToKebabRE = /\B([A-Z])/g;
-            const hyphenate = memoize(str => str.replace(camelToKebabRE, "-$1").toLowerCase());
+            const KEBAB_CASE_REGEX = /-(\w)/g;
+            const camelize = memoize(str => str.replace(KEBAB_CASE_REGEX, (_, char) => char ? char.toUpperCase() : ""));
+            const CAMEL_CASE_REGEX = /\B([A-Z])/g;
+            const hyphenate = memoize(str => str.replace(CAMEL_CASE_REGEX, "-$1").toLowerCase());
             const looseToNumber = val => {
                 const num = isString(val) ? Number(val) : NaN;
                 return isNaN(num) ? val : num;
             };
 
-            // Parse style or class string into object
-            function normalizeStyle(val) {
-                if (isArray(val)) {
+            // --- Style & Class Normalization ---
+            function normalizeStyle(value) {
+                if (isArray(value)) {
                     const styleObject = {};
-                    for (let i = 0; i < val.length; i++) {
-                        const styleItem = val[i];
-                        const parsedStyles = isString(styleItem) ? parseStyleString(styleItem) : normalizeStyle(styleItem);
-                        if (parsedStyles)
-                            for (const key in parsedStyles) styleObject[key] = parsedStyles[key];
+                    for (let i = 0; i < value.length; i++) {
+                        const styleItem = value[i];
+                        const parsed = isString(styleItem) ? parseStyleString(styleItem) : normalizeStyle(styleItem);
+                        if (parsed)
+                            for (const key in parsed) styleObject[key] = parsed[key]
                     }
-                    return styleObject;
+                    return styleObject
                 }
-                return isString(val) || isObject(val) ? val : void 0;
+                return isString(value) || isObject(value) ? value : void 0
             }
-            const styleSemicolonRE = /;(?![^(]*\))/g;
-            const styleColonRE = /:([^]+)/;
-            const styleCommentRE = /\/\*[^]*?\*\//g;
+            const STYLE_SEMICOLON_REGEX = /;(?![^(]*\))/g;
+            const STYLE_COLON_REGEX = /:([^]+)/;
+            const STYLE_COMMENT_REGEX = /\/\*[^]*?\*\//g;
 
-            // Parse CSS style string into key-value pairs
             function parseStyleString(cssText) {
                 const styleObject = {};
-                cssText.replace(styleCommentRE, "").split(styleSemicolonRE).forEach((item => {
+                return cssText.replace(STYLE_COMMENT_REGEX, "").split(STYLE_SEMICOLON_REGEX).forEach((item => {
                     if (item) {
-                        const [key, value] = item.split(styleColonRE);
-                        if (key && value) {
-                            styleObject[key.trim()] = value.trim();
-                        }
+                        const parts = item.split(STYLE_COLON_REGEX);
+                        parts.length > 1 && (styleObject[parts[0].trim()] = parts[1].trim())
                     }
-                }));
-                return styleObject;
+                })), styleObject
             }
 
-            // Convert object or array to space-separated class string
-            function normalizeClassString(value) {
-                let classStr = "";
-                if (isString(value)) classStr = value;
+            function normalizeClass(value) {
+                let classText = "";
+                if (isString(value)) classText = value;
                 else if (isArray(value))
                     for (let i = 0; i < value.length; i++) {
-                        const classItem = normalizeClassString(value[i]);
-                        classItem && (classStr += classItem + " ");
+                        const itemClass = normalizeClass(value[i]);
+                        itemClass && (classText += itemClass + " ")
                     } else if (isObject(value))
-                    for (const key in value) value[key] && (classStr += key + " ");
-                return classStr.trim();
+                    for (const key in value) value[key] && (classText += key + " ");
+                return classText.trim()
             }
 
-            // Deep equality comparison between two values
+            // --- Deep Equality Comparison ---
             function looseEqual(a, b) {
-                if (a === b) return true;
+                if (a === b) return !0;
                 let isDateA = isDate(a),
                     isDateB = isDate(b);
                 if (isDateA || isDateB) return !(!isDateA || !isDateB) && a.getTime() === b.getTime();
                 if (isDateA = isSymbol(a), isDateB = isSymbol(b), isDateA || isDateB) return a === b;
                 if (isDateA = isArray(a), isDateB = isArray(b), isDateA || isDateB) return !(!isDateA || !isDateB) && function (arrA, arrB) {
-                    if (arrA.length !== arrB.length) return false;
-                    let isEqual = true;
+                    if (arrA.length !== arrB.length) return !1;
+                    let isEqual = !0;
                     for (let i = 0; isEqual && i < arrA.length; i++) isEqual = looseEqual(arrA[i], arrB[i]);
-                    return isEqual;
+                    return isEqual
                 }(a, b);
                 if (isDateA = isObject(a), isDateB = isObject(b), isDateA || isDateB) {
-                    if (!isDateA || !isDateB) return false;
-                    if (Object.keys(a).length !== Object.keys(b).length) return false;
+                    if (!isDateA || !isDateB) return !1;
+                    if (Object.keys(a).length !== Object.keys(b).length) return !1;
                     for (const key in a) {
-                        const hasOwnA = hasOwnProperty.call(a, key),
-                            hasOwnB = hasOwnProperty.call(b, key);
-                        if (hasOwnA && !hasOwnB || !hasOwnA && hasOwnB || !looseEqual(a[key], b[key])) return false;
+                        const hasOwnA = a.hasOwnProperty(key),
+                            hasOwnB = b.hasOwnProperty(key);
+                        if (hasOwnA && !hasOwnB || !hasOwnA && hasOwnB || !looseEqual(a[key], b[key])) return !1
                     }
                 }
-                return String(a) === String(b);
+                return String(a) === String(b)
             }
 
-            // Find index of item in array using deep equality
             function looseIndexOf(arr, val) {
-                return arr.findIndex((item => looseEqual(item, val)));
+                return arr.findIndex((item => looseEqual(item, val)))
             }
 
-            // Track effect in active context
-            function trackEffect(effect, parentScope) {
-                parentScope && parentScope.active && parentScope.effects.push(effect);
+            // --- Core Reactivity System ---
+            function trackEffectInParentContext(effect, context) {
+                context && context.active && context.effects.push(effect)
             }
-
-            // Create a dependency set for effects
-            const createDep = effects => { const dep = new Set(effects); dep.w = 0; dep.n = 0; return dep; };
+            const createDep = (effects) => {
+                const dep = new Set(effects);
+                return dep.w = 0, dep.n = 0, dep
+            };
             const wasTracked = dep => (dep.w & trackOpBit) > 0;
-            const newTracked = dep => (dep.n & trackOpBit) > 0;
+            const newlyTracked = dep => (dep.n & trackOpBit) > 0;
             const targetMap = new WeakMap;
-            let trackStack = 0;
+            let effectStackDepth = 0;
             let trackOpBit = 1;
             let activeEffect;
-            const MAP_KEY_ITERATE_KEY = Symbol("");
             const ITERATE_KEY = Symbol("");
+            const MAP_KEY_ITERATE_KEY = Symbol("");
 
-            // ReactiveEffect
             class ReactiveEffect {
-                constructor(fn, scheduler = null, parentScope) {
-                    this.fn = fn;
-                    this.scheduler = scheduler;
-                    this.active = true;
-                    this.deps = [];
-                    this.parent = void 0;
-                    trackEffect(this, parentScope);
+                constructor(fn, scheduler = null, context) {
+                    this.fn = fn, this.scheduler = scheduler, this.active = !0, this.deps = [], this.parent = void 0, trackEffectInParentContext(this, context)
                 }
-
-                // Execute the effect function
                 run() {
                     if (!this.active) return this.fn();
-                    let lastActiveEffect = activeEffect,
+                    let parentEffect = activeEffect,
                         lastShouldTrack = shouldTrack;
-                    for (; lastActiveEffect;) {
-                        if (lastActiveEffect === this) return;
-                        lastActiveEffect = lastActiveEffect.parent;
+                    for (; parentEffect;) {
+                        if (parentEffect === this) return;
+                        parentEffect = parentEffect.parent
                     }
                     try {
-                        this.parent = activeEffect;
-                        activeEffect = this;
-                        shouldTrack = true;
-                        trackOpBit = 1 << ++trackStack;
-                        if (trackStack <= 30) {
-                            for (let i = 0; i < this.deps.length; i++) {
-                                this.deps[i].w |= trackOpBit;
-                            }
-                        } else {
-                            cleanupEffect(this);
-                        }
-                        return this.fn();
+                        return this.parent = activeEffect, activeEffect = this, shouldTrack = !0, trackOpBit = 1 << ++effectStackDepth, effectStackDepth <= 30 ? (({
+                            deps: e
+                        }) => {
+                            if (e.length)
+                                for (let t = 0; t < e.length; t++) e[t].w |= trackOpBit
+                        })(this) : cleanupEffect(this), this.fn()
                     } finally {
-                        if (trackStack <= 30) {
-                            const { deps } = this;
-                            let i = 0;
-                            for (let j = 0; j < deps.length; j++) {
-                                const dep = deps[j];
-                                if (wasTracked(dep) && !newTracked(dep)) {
-                                    dep.delete(this);
-                                } else {
-                                    deps[i++] = dep;
+                        effectStackDepth <= 30 && (effect => {
+                            const {
+                                deps: t
+                            } = effect;
+                            if (t.length) {
+                                let n = 0;
+                                for (let s = 0; s < t.length; s++) {
+                                    const r = t[s];
+                                    wasTracked(r) && !newlyTracked(r) ? r.delete(effect) : t[n++] = r, r.w &= ~trackOpBit, r.n &= ~trackOpBit
                                 }
-                                dep.w &= ~trackOpBit;
-                                dep.n &= ~trackOpBit;
+                                t.length = n
                             }
-                            deps.length = i;
-                        }
-                        trackOpBit = 1 << --trackStack;
-                        activeEffect = this.parent;
-                        shouldTrack = lastShouldTrack;
-                        this.parent = void 0;
-                        if (this.deferStop) this.stop();
+                        })(this), trackOpBit = 1 << --effectStackDepth, activeEffect = this.parent, shouldTrack = lastShouldTrack, this.parent = void 0, this.deferStop && this.stop()
                     }
                 }
-
-                // Stop the effect and clean up dependencies
                 stop() {
-                    if (activeEffect === this) {
-                        this.deferStop = true;
-                    } else if (this.active) {
-                        cleanupEffect(this);
-                        if (this.onStop) this.onStop();
-                        this.active = false;
-                    }
+                    activeEffect === this ? this.deferStop = !0 : this.active && (cleanupEffect(this), this.onStop && this.onStop(), this.active = !1)
                 }
             }
 
-            // Clean up dependencies for an effect
             function cleanupEffect(effect) {
-                const { deps } = effect;
-                if (deps.length > 0) {
-                    for (const dep of deps) { dep.delete(effect); }
-                    deps.length = 0;
+                const {
+                    deps: t
+                } = effect;
+                if (t.length) {
+                    for (let n = 0; n < t.length; n++) t[n].delete(effect);
+                    t.length = 0
                 }
             }
 
-
-            // Stop an effect
-            function stop(effect) {
-                effect.effect.stop();
+            function stopEffect(runner) {
+                runner.effect.stop()
             }
+            let shouldTrack = !0;
+            const shouldTrackStack = [];
 
-            // Global tracking state
-            let shouldTrack = true;
-            const trackStackArray = [];
-
-            // Track dependencies for a property
             function track(target, key) {
                 if (shouldTrack && activeEffect) {
                     let depsMap = targetMap.get(target);
-                    if (!depsMap) targetMap.set(target, depsMap = new Map);
+                    depsMap || targetMap.set(target, depsMap = new Map);
                     let dep = depsMap.get(key);
-                    if (!dep) depsMap.set(key, dep = createDep());
-                    let shouldAdd = false;
-                    if (trackStack <= 30) {
-                        if (!newTracked(dep)) {
-                            dep.n |= trackOpBit;
-                            shouldAdd = !wasTracked(dep);
-                        }
-                    } else {
-                        shouldAdd = !dep.has(activeEffect);
-                    }
-                    if (shouldAdd) {
-                        dep.add(activeEffect);
-                        activeEffect.deps.push(dep);
-                    }
+                    dep || depsMap.set(key, dep = createDep());
+                    (function (dep) {
+                        let shouldAdd = !1;
+                        effectStackDepth <= 30 ? newlyTracked(dep) || (dep.n |= trackOpBit, shouldAdd = !wasTracked(dep)) : shouldAdd = !dep.has(activeEffect), shouldAdd && (dep.add(activeEffect), activeEffect.deps.push(dep))
+                    })(dep)
                 }
             }
 
-            // Trigger dependent effects
             function trigger(target, type, key, newValue) {
                 const depsMap = targetMap.get(target);
                 if (!depsMap) return;
-                let deps = [];
-                if (type === "clear") {
-                    deps = [...depsMap.values()];
-                } else if (key === "length" && isArray(target)) {
+                let depsToRun = [];
+                if ("clear" === type) depsToRun = [...depsMap.values()];
+                else if ("length" === key && isArray(target)) {
                     const newLength = Number(newValue);
-                    depsMap.forEach((dep, depKey) => {
-                        if (depKey === "length" || depKey >= newLength) {
-                            deps.push(dep);
-                        }
-                    });
-                } else {
-                    if (key !== void 0) deps.push(depsMap.get(key));
-                    switch (type) {
-                        case "add":
-                            if (isArray(target)) {
-                                if (isIntegerKey(key)) {
-                                    deps.push(depsMap.get("length"));
-                                }
-                            } else {
-                                deps.push(depsMap.get(MAP_KEY_ITERATE_KEY));
-                                if (isMap(target)) deps.push(depsMap.get(ITERATE_KEY));
-                            }
-                            break;
-                        case "delete":
-                            if (!isArray(target)) {
-                                deps.push(depsMap.get(MAP_KEY_ITERATE_KEY));
-                                if (isMap(target)) deps.push(depsMap.get(ITERATE_KEY));
-                            }
-                            break;
-                        case "set":
-                            if (isMap(target)) deps.push(depsMap.get(MAP_KEY_ITERATE_KEY));
-                            break;
-                    }
+                    depsMap.forEach(((dep, depKey) => {
+                        ("length" === depKey || depKey >= newLength) && depsToRun.push(dep)
+                    }))
+                } else switch (void 0 !== key && depsToRun.push(depsMap.get(key)), type) {
+                    case "add":
+                        isArray(target) ? isIntegerKey(key) && depsToRun.push(depsMap.get("length")) : (depsToRun.push(depsMap.get(ITERATE_KEY)), isMap(target) && depsToRun.push(depsMap.get(MAP_KEY_ITERATE_KEY)));
+                        break;
+                    case "delete":
+                        isArray(target) || (depsToRun.push(depsMap.get(ITERATE_KEY)), isMap(target) && depsToRun.push(depsMap.get(MAP_KEY_ITERATE_KEY)));
+                        break;
+                    case "set":
+                        isMap(target) && depsToRun.push(depsMap.get(ITERATE_KEY))
                 }
-                if (deps.length === 1) {
-                    if (deps[0]) triggerEffects(deps[0]);
-                } else {
-                    const allDeps = [];
-                    for (const dep of deps) {
-                        if (dep) allDeps.push(...dep);
-                    }
-                    triggerEffects(createDep(allDeps));
+                if (1 === depsToRun.length) depsToRun[0] && triggerEffects(depsToRun[0]);
+                else {
+                    const allEffects = [];
+                    for (const dep of depsToRun) dep && allEffects.push(...dep);
+                    triggerEffects(createDep(allEffects))
                 }
             }
 
-            // Run effects in a dependency set
             function triggerEffects(dep) {
-                const effectsToRun = isArray(dep) ? dep : [...dep];
-                for (const effect of effectsToRun) {
-                    if (effect.computed) run(effect);
-                }
-                for (const effect of effectsToRun) {
-                    if (!effect.computed) run(effect);
-                }
+                const effects = isArray(dep) ? dep : [...dep];
+                for (const effect of effects) effect.computed && runEffect(effect);
+                for (const effect of effects) effect.computed || runEffect(effect)
             }
 
-            // Run a single effect
-            function run(effect) {
-                if (effect !== activeEffect || effect.allowRecurse) {
-                    if (effect.scheduler) {
-                        effect.scheduler();
-                    } else {
-                        effect.run();
-                    }
-                }
+            function runEffect(effect) {
+                (effect !== activeEffect || effect.allowRecurse) && (effect.scheduler ? effect.scheduler() : effect.run())
             }
 
-            // Create a Set of Symbol properties that are not "arguments" or "caller"
-            const symbolPropertyIsHidden = new Set(
-                Object.getOwnPropertyNames(Symbol)
-                    .filter(key => key !== "arguments" && key !== "caller")
-                    .map(key => Symbol[key])
-                    .filter(isSymbol)
-            );
-
-            // Create reactive and readonly getters
+            // --- Proxy Handlers & Reactive Object Creation ---
+            const isSpecialGettableProperty = function (str) {
+                const map = Object.create(null),
+                    list = str.split(",");
+                for (let i = 0; i < list.length; i++) map[list[i]] = !0;
+                return (val) => !!map[val]
+            }("__proto__,__v_isRef,__isVue");
+            const hiddenSymbolProperties = new Set(Object.getOwnPropertyNames(Symbol).filter((e => "arguments" !== e && "caller" !== e)).map((e => Symbol[e])).filter(isSymbol));
             const reactiveGet = createGetter();
-            const readonlyGet = createGetter(true);
+            const readonlyGet = createGetter(!0);
+            const arrayInstrumentations = function () {
+                const instrumentations = {};
+                return ["includes", "indexOf", "lastIndexOf"].forEach((key => {
+                    instrumentations[key] = function (...args) {
+                        const arr = toRaw(this);
+                        for (let i = 0, len = this.length; i < len; i++) track(arr, i + "");
+                        const res = arr[key](...args);
+                        return -1 === res || !1 === res ? arr[key](...args.map(toRaw)) : res
+                    }
+                })), ["push", "pop", "shift", "unshift", "splice"].forEach((key => {
+                    instrumentations[key] = function (...args) {
+                        shouldTrackStack.push(shouldTrack), shouldTrack = !1;
+                        const res = toRaw(this)[key].apply(this, args);
+                        return function () {
+                            const e = shouldTrackStack.pop();
+                            shouldTrack = void 0 === e || e
+                        }(), res
+                    }
+                })), instrumentations
+            }();
 
-            // Instrument array methods for reactivity tracking
-            const arrayInstrumentations = (() => {
-                const instrumentedMethods = {};
+            function hasOwn_tracked(key) {
+                const target = toRaw(this);
+                return track(target, key), target.hasOwnProperty(key)
+            }
 
-                // Read methods: includes, indexOf, lastIndexOf
-                ["includes", "indexOf", "lastIndexOf"].forEach(method => {
-                    instrumentedMethods[method] = function (...args) {
-                        const rawArray = toRaw(this);
-
-                        for (let i = 0; i < this.length; i++) {
-                            track(rawArray, String(i));
-                        }
-
-                        const result = rawArray[method](...args);
-
-                        // Retry with raw arguments if result is -1 or false
-                        return result === -1 || result === false
-                            ? rawArray[method](...args.map(toRaw))
-                            : result;
-                    };
-                });
-
-                // Mutation methods: push, pop, shift, unshift, splice
-                ["push", "pop", "shift", "unshift", "splice"].forEach(method => {
-                    instrumentedMethods[method] = function (...args) {
-                        trackStackArray.push(shouldTrack);
-                        shouldTrack = false;
-
-                        const result = toRaw(this)[method].apply(this, args);
-
-                        shouldTrack = trackStackArray.pop();
-                        return result;
-                    };
-                });
-
-                return instrumentedMethods;
-            })();
-
-            // Create getter for reactive or readonly proxy
-            function createGetter(isReadonly = false, isShallow = false) {
-                return function (target, key, receiver) {
-                    if (key === "__v_isReactive") return !isReadonly;
-                    if (key === "__v_isReadonly") return isReadonly;
-                    if (key === "__v_isShallow") return isShallow;
-                    if (key === "__v_raw" && receiver === (isReadonly ? isShallow ? shallowReadonlyMap : readonlyMap : isShallow ? shallowReactiveMap : reactiveMap).get(target)) return target;
-                    const isArr = isArray(target);
-                    if (!isReadonly && isArr && hasOwn(arrayInstrumentations, key)) {
-                        return Reflect.get(arrayInstrumentations, key, receiver);
+            function createGetter(isReadonly = !1, isShallow = !1) {
+                return function get(target, key, receiver) {
+                    if ("__v_isReactive" === key) return !isReadonly;
+                    if ("__v_isReadonly" === key) return isReadonly;
+                    if ("__v_isShallow" === key) return isShallow;
+                    if ("__v_raw" === key && receiver === (isReadonly ? isShallow ? shallowReadonlyMap : readonlyMap : isShallow ? shallowReactiveMap : reactiveMap).get(target)) return target;
+                    const isTargetArray = isArray(target);
+                    if (!isReadonly) {
+                        if (isTargetArray && hasOwn(arrayInstrumentations, key)) return Reflect.get(arrayInstrumentations, key, receiver);
                     }
                     const res = Reflect.get(target, key, receiver);
-                    if (isSymbol(key) ? symbolPropertyIsHidden.has(key) : "__proto__") {
-                        return res;
-                    }
-                    if (!isReadonly) track(target, key);
-                    if (isShallow) return res;
-                    if (isRef(res)) {
-                        return isArr && isIntegerKey(key) ? res : res.value;
-                    }
-                    if (isObject(res)) {
-                        return isReadonly ? readonly(res) : reactive(res);
-                    }
-                    return res;
-                };
+                    return (isSymbol(key) ? hiddenSymbolProperties.has(key) : isSpecialGettableProperty(key)) || (isReadonly || track(target, key), isShallow) ? res : isRef(res) ? isTargetArray && isIntegerKey(key) ? res : res.value : isObject(res) ? isReadonly ? readonly(res) : reactive(res) : res
+                }
             }
 
             const mutableHandlers = {
                 get: reactiveGet,
-                set: function (isShallow = false) {
-                    return function (target, key, value, receiver) {
+                set: function (isShallow = !1) {
+                    return function set(target, key, value, receiver) {
                         let oldValue = target[key];
-                        if (isReadonly(oldValue) && isRef(oldValue) && !isRef(value)) return false;
-                        if (!isShallow) {
-                            if (!isObject(value) && !isReadonly(value)) {
-                                oldValue = toRaw(oldValue);
-                                value = toRaw(value);
-                            }
-                            if (!isArray(target) && isRef(oldValue) && !isRef(value)) {
-                                oldValue.value = value;
-                                return true;
-                            }
-                        }
-                        const hasKey = isArray(target) && isIntegerKey(key) ? Number(key) < target.length : hasOwn(target, key);
-                        const result = Reflect.set(target, key, value, receiver);
-                        if (target === toRaw(receiver)) {
-                            if (hasKey) {
-                                if (!Object.is(value, oldValue)) trigger(target, "set", key, value);
-                            } else {
-                                trigger(target, "add", key, value);
-                            }
-                        }
-                        return result;
-                    };
+                        if (isReadonly(oldValue) && isRef(oldValue) && !isRef(value)) return !1;
+                        if (!isShallow && (!isShallowValue(value) && !isReadonly(value) && (oldValue = toRaw(oldValue), value = toRaw(value)),
+                            !isArray(target) && isRef(oldValue) && !isRef(value))) return oldValue.value = value, !0;
+                        const hadKey = isArray(target) && isIntegerKey(key) ? Number(key) < target.length : hasOwn(target, key),
+                            result = Reflect.set(target, key, value, receiver);
+                        return target === toRaw(receiver) && (hadKey ? ((e, t) => !Object.is(e, t))(value, oldValue) && trigger(target, "set", key, value) : trigger(target, "add", key, value)), result
+                    }
                 }(),
                 deleteProperty: function (target, key) {
-                    const hasKey = hasOwn(target, key);
+                    const hadKey = hasOwn(target, key);
+                    target[key];
                     const result = Reflect.deleteProperty(target, key);
-                    if (result && hasKey) trigger(target, "delete", key, void 0);
-                    return result;
+                    return result && hadKey && trigger(target, "delete", key, void 0), result
                 },
                 has: function (target, key) {
                     const result = Reflect.has(target, key);
-                    if (!isSymbol(key) || !symbolPropertyIsHidden.has(key)) track(target, key);
-                    return result;
+                    return (!isSymbol(key) || !hiddenSymbolProperties.has(key)) && track(target, key), result
                 },
                 ownKeys: function (target) {
-                    track(target, isArray(target) ? "length" : MAP_KEY_ITERATE_KEY);
-                    return Reflect.ownKeys(target);
+                    return track(target, isArray(target) ? "length" : ITERATE_KEY), Reflect.ownKeys(target)
                 }
             };
-
             const readonlyHandlers = {
                 get: readonlyGet,
-                set: (target, key) => true,
-                deleteProperty: (target, key) => true
+                set: (e, t) => !0,
+                deleteProperty: (e, t) => !0
             };
             const reactiveMap = new WeakMap;
             const shallowReactiveMap = new WeakMap;
             const readonlyMap = new WeakMap;
             const shallowReadonlyMap = new WeakMap;
 
-            // Determine reactivity type of an object
-            function getReactiveType(target) {
-                if (target.__v_skip || !Object.isExtensible(target)) return 0;
-                switch (toRawType(target).slice(8, -1)) {
-                    case "Object":
-                    case "Array":
-                        return 1;
-                    case "Map":
-                    case "Set":
-                    case "WeakMap":
-                    case "WeakSet":
-                        return 2;
-                    default:
-                        return 0;
-                }
+            function getReactivityType(value) {
+                return value.__v_skip || !Object.isExtensible(value) ? 0 : function (e) {
+                    switch (e) {
+                        case "Object":
+                        case "Array":
+                            return 1;
+                        case "Map":
+                        case "Set":
+                        case "WeakMap":
+                        case "WeakSet":
+                            return 2;
+                        default:
+                            return 0
+                    }
+                }(toRawType(value).slice(8, -1))
             }
 
-            // Create reactive proxy
             function reactive(target) {
-                if (isReadonly(target)) return target;
-                return createReactiveObject(target, false, mutableHandlers, null, reactiveMap);
-            }
-
-            // Create proxy with specified handlers
-            function createReactiveObject(target, isReadonly, baseHandlers, collectionHandlers, proxyMap) {
-                if (!isObject(target) || (target.__v_raw && (!isReadonly || !target.__v_isReactive))) return target;
-                const existingProxy = proxyMap.get(target);
-                if (existingProxy) return existingProxy;
-                const reactiveType = getReactiveType(target);
-                if (reactiveType === 0) return target;
-                const proxy = new Proxy(target, reactiveType === 2 ? collectionHandlers : baseHandlers);
-                proxyMap.set(target, proxy);
-                return proxy;
-            }
-
-            // Check if object is readonly
-            function isReadonly(value) {
-                return !!(value && value.__v_isReadonly);
+                return isReadonly(target) ? target : createReactiveObject(target, !1, mutableHandlers, null, reactiveMap)
             }
 
             function readonly(target) {
-                return createReactiveObject(target, true, readonlyHandlers, null, readonlyMap);
+                return createReactiveObject(target, !0, readonlyHandlers, null, readonlyMap)
             }
 
-            // Get raw value of a reactive or readonly object
+            function createReactiveObject(target, isReadonly, baseHandlers, collectionHandlers, proxyMap) {
+                if (!isObject(target) || target.__v_raw && (!isReadonly || !target.__v_isReactive)) return target;
+                const existingProxy = proxyMap.get(target);
+                if (existingProxy) return existingProxy;
+                const reactivityType = getReactivityType(target);
+                if (0 === reactivityType) return target;
+                const proxy = new Proxy(target, 2 === reactivityType ? collectionHandlers : baseHandlers);
+                return proxyMap.set(target, proxy), proxy
+            }
+
+            function isReadonly(value) {
+                return !(!value || !value.__v_isReadonly)
+            }
+
             function toRaw(observed) {
                 const raw = observed && observed.__v_raw;
-                return raw ? toRaw(raw) : observed;
+                return raw ? toRaw(raw) : observed
             }
 
-            // Check if value is a ref
             function isRef(value) {
-                return !!(value && value.__v_isRef === true);
+                return !(!value || !0 !== value.__v_isRef)
             }
-            let isFlushing = false;
+            const isShallowValue = (value) => !(!value || !value.__v_isShallow);
+
+            // --- Scheduler ---
+            let isFlushing = !1;
             const queue = [];
             const resolvedPromise = Promise.resolve();
             const nextTick = fn => resolvedPromise.then(fn);
             const queueJob = job => {
-                if (!queue.includes(job)) {
-                    queue.push(job);
-                    if (!isFlushing) {
-                        isFlushing = true;
-                        nextTick(flushJobs);
-                    }
-                }
+                queue.includes(job) || queue.push(job), isFlushing || (isFlushing = !0, nextTick(flushJobs))
             };
             const flushJobs = () => {
                 for (const job of queue) job();
-                queue.length = 0;
-                isFlushing = false;
+                queue.length = 0, isFlushing = !1
             };
-            const forceEnabledAttrsRE = /^(spellcheck|draggable|form|list|type)$/;
 
-            // bind Directive
-            const bindDirective = ({ el, get, arg, modifiers }) => {
-                let previousValue;
-                // Preserve original class if binding to "class"
-                if (arg === "class") { el._class = el.className; }
-                const updateBinding = () => {
-                    const currentValue = get();
-                    if (arg) {
-                        const bindingKey = modifiers?.camel ? camelize(arg) : arg;
-                        applyBinding(el, bindingKey, currentValue, previousValue);
-                    } else {
-                        // Apply new bindings
-                        for (const key in currentValue) {
-                            applyBinding(el, key, currentValue[key], previousValue?.[key]);
-                        }
-                        // Remove old bindings that no longer exist
-                        if (previousValue) {
-                            for (const key in previousValue) {
-                                if (!(key in currentValue)) { applyBinding(el, key, null); }
-                            }
-                        }
+            // --- Directives Logic & Helpers ---
+            const forceEnabledAttrsRegex = /^(spellcheck|draggable|form|list|type)$/;
+            const bindDirective = ({
+                el: e,
+                get: t,
+                effect: n,
+                arg: s,
+                modifiers: r
+            }) => {
+                let i;
+                "class" === s && (e._class = e.className), n((() => {
+                    let n = t();
+                    if (s) null != r && r.camel && (s = camelize(s)), applyBinding(e, s, n, i);
+                    else {
+                        for (const t in n) applyBinding(e, t, n[t], i && i[t]);
+                        for (const t in i) (!n || !(t in n)) && applyBinding(e, t, null)
                     }
-                    previousValue = currentValue;
-                };
-                new ReactiveEffect(updateBinding, null, el.scope).run();
+                    i = n
+                }))
             };
-
-            // applyBinding
-            const applyBinding = (el, key, value, prevValue) => {
-                if (key === "class") {
-                    el.setAttribute("class", normalizeClassString(el._class ? [el._class, value] : value) || "");
-                } else if (key === "style") {
-                    value = normalizeStyle(value);
+            const applyBinding = (e, t, n, s) => {
+                if ("class" === t) e.setAttribute("class", normalizeClass(e._class ? [e._class, n] : n) || "");
+                else if ("style" === t) {
+                    n = normalizeStyle(n);
                     const {
-                        style
-                    } = el;
-                    if (value) {
-                        if (isString(value)) {
-                            if (value !== prevValue) style.cssText = value;
-                        } else {
-                            for (const styleKey in value) {
-                                setStyleProperty(style, styleKey, value[styleKey]);
-                            }
-                            if (prevValue && !isString(prevValue)) {
-                                for (const styleKey in prevValue) {
-                                    if (value[styleKey] == null) setStyleProperty(style, styleKey, "");
-                                }
-                            }
+                        style: t
+                    } = e;
+                    if (n)
+                        if (isString(n)) n !== s && (t.cssText = n);
+                        else {
+                            for (const e in n) setStyleProperty(t, e, n[e]);
+                            if (s && !isString(s))
+                                for (const e in s) null == n[e] && setStyleProperty(t, e, "")
                         }
-                    } else {
-                        el.removeAttribute("style");
-                    }
-                } else if (el instanceof SVGElement || !(key in el) || forceEnabledAttrsRE.test(key)) {
-                    if (key === "true-value") {
-                        el._trueValue = value;
-                    } else if (key === "false-value") {
-                        el._falseValue = value;
-                    } else if (value != null) {
-                        el.setAttribute(key, value);
-                    } else {
-                        el.removeAttribute(key);
-                    }
-                } else {
-                    el[key] = value;
-                    if (key === "value") el._value = value;
-                }
+                    else e.removeAttribute("style")
+                } else e instanceof SVGElement || !(t in e) || forceEnabledAttrsRegex.test(t) ? "true-value" === t ? e._trueValue = n : "false-value" === t ? e._falseValue = n : null != n ? e.setAttribute(t, n) : e.removeAttribute(t) : (e[t] = n, "value" === t && (e._value = n))
             };
-
-            // important regex
-            const importantRE = /\s*!important$/;
-
-            // set style property
-            const setStyleProperty = (style, key, value) => {
-                if (isArray(value)) {
-                    value.forEach(val => setStyleProperty(style, key, val));
-                } else {
-                    if (key.startsWith("--")) {
-                        style.setProperty(key, value);
-                    } else if (importantRE.test(value)) {
-                        style.setProperty(hyphenate(key), value.replace(importantRE, ""), "important");
-                    } else {
-                        style[key] = value;
-                    }
-                }
+            const importantRegex = /\s*!important$/;
+            const setStyleProperty = (e, t, n) => {
+                isArray(n) ? n.forEach((n => setStyleProperty(e, t, n))) : t.startsWith("--") ? e.setProperty(t, n) : importantRegex.test(n) ? e.setProperty(hyphenate(t), n.replace(importantRegex, ""), "important") : e[t] = n
             };
-
-            // get attribute and remove it
-            const getAndRemoveAttr = (el, name) => {
-                const value = el.getAttribute(name);
-                if (value != null) el.removeAttribute(name);
-                return value;
+            const getAndRemoveAttr = (e, t) => {
+                const n = e.getAttribute(t);
+                return null != n && e.removeAttribute(t), n
             };
-
-            // add event listener
-            const addEventListener = (el, eventName, handler, modifiers) => {
-                el.addEventListener(eventName, handler, modifiers);
+            const addEventListener = (e, t, n, s) => {
+                e.addEventListener(t, n, s)
             };
-
-            // validate expression regex
-            const isSimplePathRE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\['[^']*?']|\["[^"]*?"]|\[\d+]|\[[A-Za-z_$][\w$]*])*$/;
+            const simplePathRE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\['[^']*?']|\["[^"]*?"]|\[\d+]|\[[A-Za-z_$][\w$]*])*$/;
             const modifierKeys = ["ctrl", "shift", "alt", "meta"];
-
-            // event modifiers
             const eventModifiers = {
                 stop: e => e.stopPropagation(),
                 prevent: e => e.preventDefault(),
@@ -646,475 +464,470 @@
                 shift: e => !e.shiftKey,
                 alt: e => !e.altKey,
                 meta: e => !e.metaKey,
-                left: e => "button" in e && e.button !== 0,
-                middle: e => "button" in e && e.button !== 1,
-                right: e => "button" in e && e.button !== 2,
-                exact: (e, modifiers) => modifierKeys.some(key => e[`${key}Key`] && !modifiers[key])
+                left: e => "button" in e && 0 !== e.button,
+                middle: e => "button" in e && 1 !== e.button,
+                right: e => "button" in e && 2 !== e.button,
+                exact: (e, t) => modifierKeys.some((n => e[`${n}Key`] && !t[n]))
             };
-
-            // onDirective
-
-            const onDirective = ({ el, get, exp, arg, modifiers }) => {
-                if (!arg) return;
-
-                // Create the event handler from the expression
-                const isSimple = isSimplePathRE.test(exp);
-                let handler = get(isSimple ? `(e => ${exp}(e))` : `($event => { ${exp} })`);
-
-                // Handle lifecycle events
-                if (arg === "mount" || arg === "load") {
-                    nextTick(handler);
-                    return;
-                }
-
-                if (arg === "unmount"|| arg === "unload") {
-                    return () => handler();
-                }
-
-                // Normalize mouse event modifiers
-                if (arg === "click" && modifiers) {
-                    if (modifiers.right) arg = "contextmenu";
-                    if (modifiers.middle) arg = "mouseup";
-                }
-
-                const rawHandler = handler;
-
-                // Wrap handler with key/modifier checks
-                handler = event => {
-                    if ("key" in event && !(hyphenate(event.key) in modifiers)) {
-                        return;
-                    }
-
-                    for (const key in modifiers) {
-                        const modifierHandler = eventModifiers[key];
-                        if (modifierHandler && modifierHandler(event, modifiers)) {
-                            return;
+            const onDirective = ({ el: e, get: t, exp: n, arg: s, modifiers: r }) => {
+                if (!s) return;
+                let i = simplePathRE.test(n) ? t(`(e => ${n}(e))`) : t(`($event => { ${n} })`);
+                if ("mount" !== s) {
+                    if ("unmount" === s) return () => i();
+                    if (r) {
+                        "click" === s && (r.right && (s = "contextmenu"), r.middle && (s = "mouseup"));
+                        const e = i;
+                        i = t => {
+                            if (!("key" in t) || hyphenate(t.key) in r) {
+                                for (const e in r) {
+                                    const n = eventModifiers[e];
+                                    if (n && n(t, r)) return
+                                }
+                                return e(t)
+                            }
                         }
                     }
-
-                    return rawHandler(event);
-                };
-
-                addEventListener(el, arg, handler, modifiers);
+                    addEventListener(e, s, i, r)
+                } else nextTick(i)
             };
-
-
-
-            // textDirective
-            const textDirective = ({
-                el,
-                get
-            }) => {
-                const effectFn = () => {
-                    el.textContent = toString(get());
-                };
-                new ReactiveEffect(effectFn, null, el.scope).run();
+            const textDirective = ({ el: e, get: t, effect: n }) => {
+                n((() => {
+                    e.textContent = toString(t())
+                }))
             };
-
-            // format value to string
-            const toString = val => val == null ? "" : isObject(val) ? JSON.stringify(val, null, 2) : String(val);
-
-            // getInputValue
-            const getInputValue = el => "_value" in el ? el._value : el.value;
-
-            // getCheckbox or radio value
-            const getCheckboxOrRadioValue = (el, isTrue) => {
-                const key = isTrue ? "_trueValue" : "_falseValue";
-                return key in el ? el[key] : isTrue;
+            const toString = e => null == e ? "" : isObject(e) ? JSON.stringify(e, null, 2) : String(e);
+            const getInputValue = e => "_value" in e ? e._value : e.value;
+            const getCheckboxValue = (e, t) => {
+                const n = t ? "_trueValue" : "_falseValue";
+                return n in e ? e[n] : t
             };
-
-            // composition Start
             const onCompositionStart = e => {
-                e.target.composing = true;
+                e.target.composing = !0
             };
-
-            // composition End
             const onCompositionEnd = e => {
-                const el = e.target;
-                if (el.composing) {
-                    el.composing = false;
-                    dispatchEvent(el, "input");
-                }
+                const t = e.target;
+                t.composing && (t.composing = !1, dispatchEvent(t, "input"))
             };
-
-            // dispatch event
-            const dispatchEvent = (el, eventName) => {
-                const event = document.createEvent("HTMLEvents");
-                event.initEvent(eventName, true, true);
-                el.dispatchEvent(event);
+            const dispatchEvent = (e, t) => {
+                const n = document.createEvent("HTMLEvents");
+                n.initEvent(t, !0, !0), e.dispatchEvent(n)
             };
-
-            // expression cache
             const expressionCache = Object.create(null);
-
-            // evaluate expression
-            const evaluateExpression = (scope, exp, el) => evaluateExpressionWithCache(scope, `return(${exp})`, el);
-
-            // evaluate expression with cache
-            const evaluateExpressionWithCache = (scope, exp, el) => {
-                const fn = expressionCache[exp] || (expressionCache[exp] = createExpressionFunction(exp));
+            const evaluate = (e, t, n) => evaluateAndCache(e, `return(${t})`, n);
+            const evaluateAndCache = (e, t, n) => {
+                const s = expressionCache[t] || (expressionCache[t] = createExpressionFunction(t));
                 try {
-                    return fn(scope, el);
-                } catch (error) {
-                    console.error(error);
+                    return s(e, n)
+                } catch (r) {
+                    console.error(r)
                 }
             };
-
-            // create Expression function
-            const createExpressionFunction = exp => {
+            const createExpressionFunction = e => {
                 try {
-                    return new Function("$data", "$el", `with($data){${exp}}`);
-                } catch (error) {
-                    console.error(`${error.message} in expression: ${exp}`);
-                    return () => { };
+                    return new Function("$data", "$el", `with($data){${e}}`)
+                } catch (t) {
+                    return console.error(`${t.message} in expression: ${e}`), () => { }
                 }
             };
-
-            // directives
             const directives = {
                 bind: bindDirective,
                 on: onDirective,
                 show: ({
-                    el,
-                    get
+                    el: e,
+                    get: t,
+                    effect: n
                 }) => {
-                    const display = el.style.display;
-                    const effectFn = () => {
-                        el.style.display = get() ? display : "none";
-                    };
-                    new ReactiveEffect(effectFn, null, el.scope).run();
+                    const s = e.style.display;
+                    n((() => {
+                        e.style.display = t() ? s : "none"
+                    }))
                 },
                 text: textDirective,
                 html: ({
-                    el,
-                    get
+                    el: e,
+                    get: t,
+                    effect: n
                 }) => {
-                    const effectFn = () => {
-                        el.innerHTML = toString(get());
-                    };
-                    new ReactiveEffect(effectFn, null, el.scope).run();
+                    n((() => {
+                        e.innerHTML = t()
+                    }))
                 },
                 model: ({
-                    el,
-                    exp,
-                    get,
-                    modifiers
+                    el: e,
+                    exp: t,
+                    get: n,
+                    effect: s,
+                    modifiers: i
                 }) => {
-                    const type = el.type;
-                    const setter = get(`(val) => { ${exp} = val }`);
-                    const {
-                        trim,
-                        number = type === "number"
-                    } = modifiers || {};
-
-                    if (el.tagName === "SELECT") {
-                        const selectEl = el;
-                        addEventListener(selectEl, "change", () => {
-                            const selectedValues = Array.prototype.filter
-                                .call(selectEl.options, option => option.selected)
-                                .map(option => number ? looseToNumber(getInputValue(option)) : getInputValue(option));
-                            setter(selectEl.multiple ? selectedValues : selectedValues[0]);
-                        });
-                        const effectFn = () => {
-                            const modelValue = get();
-                            const isMultiple = selectEl.multiple;
-                            for (let i = 0, len = selectEl.options.length; i < len; i++) {
-                                const option = selectEl.options[i];
-                                const optionValue = getInputValue(option);
-                                if (isMultiple) {
-                                    if (isArray(modelValue)) {
-                                        option.selected = looseIndexOf(modelValue, optionValue) > -1;
-                                    } else {
-                                        option.selected = modelValue.has(optionValue);
-                                    }
-                                } else if (looseEqual(getInputValue(option), modelValue)) {
-                                    if (selectEl.selectedIndex !== i) selectEl.selectedIndex = i;
-                                    return;
+                    const o = e.type,
+                        c = n(`(val) => { ${t} = val }`),
+                        {
+                            trim: l,
+                            number: f = "number" === o
+                        } = i || {};
+                    if ("SELECT" === e.tagName) {
+                        const t = e;
+                        addEventListener(e, "change", (() => {
+                            const e = Array.prototype.filter.call(t.options, (e => e.selected)).map((e => f ? looseToNumber(getInputValue(e)) : getInputValue(e)));
+                            c(t.multiple ? e : e[0])
+                        })), s((() => {
+                            const e = n(),
+                                s = t.multiple;
+                            for (let n = 0, i = t.options.length; n < i; n++) {
+                                const i = t.options[n],
+                                    o = getInputValue(i);
+                                if (s) isArray(e) ? i.selected = looseIndexOf(e, o) > -1 : i.selected = e.has(o);
+                                else if (looseEqual(getInputValue(i), e)) return void (t.selectedIndex !== n && (t.selectedIndex = n))
+                            } !s && -1 !== t.selectedIndex && (t.selectedIndex = -1)
+                        }))
+                    } else if ("checkbox" === o) {
+                        let t;
+                        addEventListener(e, "change", (() => {
+                            const t = n(),
+                                s = e.checked;
+                            if (isArray(t)) {
+                                const n = getInputValue(e),
+                                    r = looseIndexOf(t, n),
+                                    i = -1 !== r;
+                                if (s && !i) c(t.concat(n));
+                                else if (!s && i) {
+                                    const e = [...t];
+                                    e.splice(r, 1), c(e)
                                 }
-                            }
-                            if (!isMultiple && selectEl.selectedIndex !== -1) {
-                                selectEl.selectedIndex = -1;
-                            }
-                        };
-                        new ReactiveEffect(effectFn, () => queueJob(effectFn), el.scope).run();
-                    } else if (type === "checkbox") {
-                        let prevValue;
-                        addEventListener(el, "change", () => {
-                            const modelValue = get();
-                            const isChecked = el.checked;
-                            if (isArray(modelValue)) {
-                                const checkboxValue = getInputValue(el);
-                                const index = looseIndexOf(modelValue, checkboxValue);
-                                const hasValue = index !== -1;
-                                if (isChecked && !hasValue) {
-                                    setter(modelValue.concat(checkboxValue));
-                                } else if (!isChecked && hasValue) {
-                                    const newArray = [...modelValue];
-                                    newArray.splice(index, 1);
-                                    setter(newArray);
-                                }
-                            } else {
-                                setter(getCheckboxOrRadioValue(el, isChecked));
-                            }
-                        });
-                        const effectFn = () => {
-                            const modelValue = get();
-                            if (isArray(modelValue)) {
-                                el.checked = looseIndexOf(modelValue, getInputValue(el)) > -1;
-                            } else if (modelValue !== prevValue) {
-                                el.checked = looseEqual(modelValue, getCheckboxOrRadioValue(el, true));
-                            }
-                            prevValue = modelValue;
-                        };
-                        new ReactiveEffect(effectFn, () => queueJob(effectFn), el.scope).run();
-                    } else if (type === "radio") {
-                        let prevValue;
-                        addEventListener(el, "change", () => {
-                            setter(getInputValue(el));
-                        });
-                        const effectFn = () => {
-                            const modelValue = get();
-                            if (modelValue !== prevValue) {
-                                el.checked = looseEqual(modelValue, getInputValue(el));
-                            }
-                            prevValue = modelValue;
-                        };
-                        new ReactiveEffect(effectFn, () => queueJob(effectFn), el.scope).run();
+                            } else c(getCheckboxValue(e, s))
+                        })), s((() => {
+                            const s = n();
+                            isArray(s) ? e.checked = looseIndexOf(s, getInputValue(e)) > -1 : s !== t && (e.checked = looseEqual(s, getCheckboxValue(e, !0))), t = s
+                        }))
+                    } else if ("radio" === o) {
+                        let t;
+                        addEventListener(e, "change", (() => {
+                            c(getInputValue(e))
+                        })), s((() => {
+                            const s = n();
+                            s !== t && (e.checked = looseEqual(s, getInputValue(e)))
+                        }))
                     } else {
-                        const isTextarea = el.tagName === "TEXTAREA";
-                        const triggerEvent = (modifiers && modifiers.lazy) ? "change" : "input";
-                        const hasComposition = !isTextarea && type === "text";
-
-                        addEventListener(el, triggerEvent, () => {
-                            if (hasComposition && el.composing) return;
-                            let value = getInputValue(el);
-                            if (trim) value = value.trim();
-                            if (number) value = looseToNumber(value);
-                            setter(value);
-                        });
-
-                        if (hasComposition) {
-                            addEventListener(el, "compositionstart", onCompositionStart);
-                            addEventListener(el, "compositionend", onCompositionEnd);
-                        }
-
-
-                        // Fixed effect to update input value reactively
-                        const effectFn = () => {
-                            const value = get();
-                            if (el.value !== value) {
-                                el.value = value == null ? "" : value;
-                            }
-                        };
-
-                        new ReactiveEffect(effectFn, () => queueJob(effectFn), el.scope).run();
-                        // *** FIX ENDS HERE ***
+                        const t = e => l ? e.trim() : f ? looseToNumber(e) : e;
+                        addEventListener(e, "compositionstart", onCompositionStart), addEventListener(e, "compositionend", onCompositionEnd), addEventListener(e, null != i && i.lazy ? "change" : "input", (() => {
+                            e.composing || c(t(e.value))
+                        })), l && addEventListener(e, "change", (() => {
+                            e.value = e.value.trim()
+                        })), s((() => {
+                            if (e.composing) return;
+                            const s = e.value,
+                                r = n();
+                            document.activeElement === e && t(s) === r || s !== r && (e.value = r)
+                        }))
                     }
                 },
-                cloak: ({
-                    el
-                }) => el.removeAttribute("v-cloak")
-            };
-
-            // Parses a string containing {{ }} interpolations into text and expression tokens
-            const parseText = (text) => {
-                if (typeof text !== "string" || !text.includes("}}")) { return null; }
-                const tokens = [];
-                const interpolationRegex = /\{\{((?:.|\r?\n)+?)\}\}/g;
-                let lastIndex = 0;
-                let match;
-                while ((match = interpolationRegex.exec(text)) !== null) {
-                    const matchStart = match.index;
-                    const matchEnd = matchStart + match[0].length;
-                    // Add preceding plain text as a token
-                    if (matchStart > lastIndex) {
-                        tokens.push({ type: "text", value: text.slice(lastIndex, matchStart) });
-                    }
-                    // Add the interpolated expression as a token
-                    tokens.push({ type: "expression", value: match[1].trim() });
-                    lastIndex = matchEnd;
-                }
-
-                // Add any remaining text after the last match
-                if (lastIndex < text.length) {
-                    tokens.push({
-                        type: "text",
-                        value: text.slice(lastIndex)
-                    });
-                }
-                return tokens;
-            };
-
-            // Walk through the DOM and initialize directives and text nodes
-            const walk = (el, scope) => {
-                for (const node of [...el.childNodes]) {
-                    if (node.nodeType === 3) { // Text node
-                        const tokens = parseText(node.data);
-                        if (tokens && tokens.length) {
-                            const parent = node.parentNode;
-                            const fragment = document.createDocumentFragment();
-                            for (const token of tokens) {
-                                if (token.type === 'expression') {
-                                    const textNode = document.createTextNode('');
-                                    fragment.appendChild(textNode);
-                                    const effectFn = () => {
-                                        // Ensure reactive dependencies are tracked
-                                        const value = scope.evaluate(token.value, node);
-                                        textNode.data = toString(value);
-                                    };
-                                    // Use queueJob to batch updates and ensure reactivity
-                                    new ReactiveEffect(effectFn, () => queueJob(effectFn), scope).run();
-                                } else {
-                                    fragment.appendChild(document.createTextNode(token.value));
-                                }
-                            }
-                            parent.replaceChild(fragment, node);
-                        }
-                    } else if (node.nodeType === 1) { // Element node
-                        if (!node.hasAttribute('v-scope')) {
-                            walk(node, scope);
-                        }
-                    }
+                effect: ({
+                    el: e,
+                    ctx: t,
+                    exp: n,
+                    effect: s
+                }) => {
+                    nextTick((() => s((() => evaluateAndCache(t.scope, n, e)))))
                 }
             };
-
-            // Scope
-            class Scope {
-                // Constructor for Scope
-                constructor(el, data = {}, parentScope = null, availableDirectives) {
-                    this.el = el;
-                    this.el.scope = this;
-                    this.effects = [];
-                    this.parent = parentScope;
-                    this.data = reactive(data);
-                    this.availableDirectives = availableDirectives;
-                    this.init();
-                }
-                // Evaluate an expression in the context of this scope
-                evaluate(exp, el) {
-                    return evaluateExpression(this.data, exp, el);
-                }
-                // Initialize the scope by processing directives and attributes
-                init() {
-                    const dataProxy = this.data;
-                    const directiveAttributes = [];
-                    const allElements = [this.el, ...this.el.querySelectorAll('*')];
-
-                    for (const element of allElements) {
-                        const closestScopeEl = element.closest('[v-scope]');
-                        if (element === this.el || (closestScopeEl && closestScopeEl === this.el)) {
-                            for (const attr of [...element.attributes]) {
-                                if (attr.name.startsWith('v-')) {
-                                    directiveAttributes.push(attr);
-                                }
-                            }
+            const forRegex = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
+            const forAliasRegex = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
+            const forParensRegex = /^\(|\)$/g;
+            const forDestructureRegex = /^[{[]\s*((?:[\w_$]+\s*,?\s*)+)[\]}]$/;
+            const forDirective = (e, t, n) => {
+                const s = t.match(forRegex);
+                if (!s) return;
+                const i = e.nextSibling,
+                    o = e.parentElement,
+                    c = new Text("");
+                o.insertBefore(c, e), o.removeChild(e);
+                const l = s[2].trim();
+                let u, a, p, h, d = s[1].trim().replace(forParensRegex, "").trim(),
+                    m = !1,
+                    g = "key",
+                    v = e.getAttribute(g) || e.getAttribute(g = ":key") || e.getAttribute(g = "v-bind:key");
+                v && (e.removeAttribute(g), "key" === g && (v = JSON.stringify(v))), (h = d.match(forAliasRegex)) && (d = d.replace(forAliasRegex, "").trim(), a = h[1].trim(), h[2] && (p = h[2].trim())), (h = d.match(forDestructureRegex)) && (u = h[1].split(",").map((e => e.trim())), m = "[" === d[0]);
+                let y, b, _, w = !1;
+                const x = (e, t, s, r) => {
+                    const i = {};
+                    u ? u.forEach(((e, n) => i[e] = t[m ? n : e])) : i[d] = t, r ? (a && (i[a] = r), p && (i[p] = s)) : a && (i[a] = s);
+                    const o = createChildContext(n, i),
+                        c = v ? evaluate(o.scope, v) : s;
+                    return e.set(c, s), o.key = c, o
+                },
+                    $ = (t, n) => {
+                        const s = new Block(e, t);
+                        return s.key = t.key, s.insert(o, n), s
+                    };
+                return n.effect((() => {
+                    const e = evaluate(n.scope, l),
+                        t = _;
+                    if ([b, _] = (e => {
+                        const t = new Map,
+                            n = [];
+                        if (isArray(e))
+                            for (let s = 0; s < e.length; s++) n.push(x(t, e[s], s));
+                        else if ("number" == typeof e)
+                            for (let s = 0; s < e; s++) n.push(x(t, s + 1, s));
+                        else if (isObject(e)) {
+                            let s = 0;
+                            for (const r in e) n.push(x(t, e[r], s++, r))
                         }
+                        return [n, t]
+                    })(e), w) {
+                        for (let t = 0; t < y.length; t++) _.has(y[t].key) || y[t].remove();
+                        const e = [];
+                        let n, s, r = b.length;
+                        for (; r--;) {
+                            const i = b[r],
+                                l = t.get(i.key);
+                            let f;
+                            null == l ? f = $(i, n ? n.el : c) : (f = y[l], Object.assign(f.ctx.scope, i.scope), l !== r && (y[l + 1] !== n || s === n) && (s = f, f.insert(o, n ? n.el : c))), e.unshift(n = f)
+                        }
+                        y = e
+                    } else y = b.map((e => $(e, c))), w = !0
+                })), i
+            };
+            const refDirective = ({
+                el: e,
+                ctx: {
+                    scope: {
+                        $refs: t
                     }
-                    // Sort directive attributes by their names to ensure consistent processing order
-                    directiveAttributes.sort((a, b) => {
-                        const order = ["cloak", "if", "for", "bind", "on", "model", "text", "html", "show"];
-                        const aName = a.name.split(/[:.]/)[0];
-                        const bName = b.name.split(/[:.]/)[0];
-                        return order.indexOf(aName) - order.indexOf(bName);
-                    }).forEach(attr => {
-                        const {
-                            name,
-                            value,
-                            ownerElement
-                        } = attr;
-                        const [directiveFullName, ...modifierStrings] = name.split(".");
-                        const [directiveName, arg] = directiveFullName.split(":");
-                        const directive = directiveName.substring(2);
-                        const expression = value;
-                        const modifiers = Object.fromEntries(modifierStrings.map(m => [m, true]));
-
-                        const handler = this.availableDirectives[directive];
-                        if (handler) {
-                            const get = (exp = expression) => evaluateExpression(dataProxy, exp, ownerElement);
-
-                            handler({
-                                el: ownerElement,
-                                exp: expression,
-                                arg,
-                                modifiers,
-                                get
+                },
+                get: n,
+                effect: s
+            }) => {
+                let r;
+                return s((() => {
+                    const s = n();
+                    t[s] = e, r && s !== r && delete t[r], r = s
+                })), () => {
+                    r && delete t[r]
+                }
+            };
+            const directivePrefixRegex = /^(?:v-|:|@)/;
+            const modifierRegex = /\.([\w-]+)/g;
+            let isOnceActive = !1;
+            const processNode = (e, t) => {
+                const n = e.nodeType;
+                if (1 === n) {
+                    const n = e;
+                    if (n.hasAttribute("v-pre")) return;
+                    let s;
+                    if (getAndRemoveAttr(n, "v-cloak"), s = getAndRemoveAttr(n, "v-if")) return ((e, t, n) => {
+                        const s = e.parentElement,
+                            r = new Comment("v-if");
+                        s.insertBefore(r, e);
+                        const i = [{
+                            exp: t,
+                            el: e
+                        }];
+                        let o, c;
+                        for (;
+                            (o = e.nextElementSibling) && (c = null, "" === getAndRemoveAttr(o, "v-else") || (c = getAndRemoveAttr(o, "v-else-if")));) s.removeChild(o), i.push({
+                                exp: c,
+                                el: o
                             });
-                        }
-                        ownerElement.removeAttribute(name);
-                    });
-
-                    walk(this.el, this);
-                }
-
-                teardown() {
-                    this.effects.forEach(effect => effect.stop());
-                }
-            };
-
-            // init
-            const init = (initialData = {}) => {
-                let scopes = [];
-                const localDirectives = Object.assign({}, directives);
-                let appData = reactive(initialData);
-                // Create the main app object
-                const app = {
-                    data(dataObject) {
-                        appData = reactive(dataObject);
-                        return app;
-                    },
-                    directive(name, directive) {
-                        localDirectives[name] = directive;
-                        return app;
-                    },
-                    plugin(pluginFn) {
-                        pluginFn(app);
-                        return app;
-                    },
-                    get scope() {
-                        return scopes[0] && scopes[0].data;
-                    },
-                    get directives() {
-                        return localDirectives;
-                    },
-                    get(key) {
-                        return localDirectives[key];
-                    },
-                    set(key, fn) {
-                        localDirectives[key] = fn;
-                        return app;
-                    },
-                    mount(rootElement) {
-                        if (isString(rootElement) && !(rootElement = document.querySelector(rootElement))) return;
-                        let rootElements;
-                        rootElements = (rootElement = rootElement || document.documentElement).hasAttribute("v-scope") ? [rootElement] : [...rootElement.querySelectorAll("[v-scope]")].filter(child => !child.matches("[v-scope] [v-scope]"));
-                        if (!rootElements.length) rootElements = [rootElement];
-                        scopes = rootElements.map(el => new Scope(el, appData, null, localDirectives));
-                        return app.scope;
-                    },
-                    unmount() {
-                        scopes.forEach(scope => scope.teardown());
+                        const l = e.nextSibling;
+                        s.removeChild(e);
+                        let f, u = -1;
+                        const a = () => {
+                            f && (s.insertBefore(r, f.el), f.remove(), f = void 0)
+                        };
+                        return n.effect((() => {
+                            for (let e = 0; e < i.length; e++) {
+                                const {
+                                    exp: t,
+                                    el: o
+                                } = i[e];
+                                if (!t || evaluate(n.scope, t)) return void (e !== u && (a(), f = new Block(o, n), f.insert(s, r), s.removeChild(r), u = e))
+                            }
+                            u = -1, a()
+                        })), l
+                    })(n, s, t);
+                    if (s = getAndRemoveAttr(n, "v-for")) return forDirective(n, s, t);
+                    if ((s = getAndRemoveAttr(n, "v-scope")) || "" === s) {
+                        const e = s ? evaluate(t.scope, s) : {};
+                        t = createChildContext(t, e), e.$template && renderTemplate(n, e.$template)
                     }
+                    const r = null != getAndRemoveAttr(n, "v-once");
+                    r && (isOnceActive = !0), (s = getAndRemoveAttr(n, "ref")) && applyDirective(n, refDirective, `"${s}"`, t), walkChildren(n, t);
+                    const i = [];
+                    for (const {
+                        name: e,
+                        value: o
+                    }
+                        of [...n.attributes]) directivePrefixRegex.test(e) && "v-cloak" !== e && ("v-model" === e ? i.unshift([e, o]) : "@" === e[0] || /^v-on\b/.test(e) ? i.push([e, o]) : processSingleDirective(n, e, o, t));
+                    for (const [e, o] of i) processSingleDirective(n, e, o, t);
+                    r && (isOnceActive = !1)
+                } else if (3 === n) {
+                    const n = e.data;
+                    if (n.includes(t.delimiters[0])) {
+                        let s, r = [],
+                            i = 0;
+                        for (; s = t.delimitersRE.exec(n);) {
+                            const e = n.slice(i, s.index);
+                            e && r.push(JSON.stringify(e)), r.push(`$s(${s[1]})`), i = s.index + s[0].length
+                        }
+                        i < n.length && r.push(JSON.stringify(n.slice(i))), applyDirective(e, textDirective, r.join("+"), t)
+                    }
+                } else 11 === n && walkChildren(e, t)
+            },
+                walkChildren = (e, t) => {
+                    let n = e.firstChild;
+                    for (; n;) n = processNode(n, t) || n.nextSibling
+                },
+                processSingleDirective = (e, t, n, s) => {
+                    let r, i, o;
+                    if (":" === (t = t.replace(modifierRegex, ((e, t) => ((o || (o = {}))[t] = !0, ""))))[0]) r = bindDirective, i = t.slice(1);
+                    else if ("@" === t[0]) r = onDirective, i = t.slice(1);
+                    else {
+                        const e = t.indexOf(":"),
+                            n = e > 0 ? t.slice(2, e) : t.slice(2);
+                        r = directives[n] || s.dirs[n], i = e > 0 ? t.slice(e + 1) : void 0
+                    }
+                    r && (r === bindDirective && "ref" === i && (r = refDirective), applyDirective(e, r, n, s, i, o), e.removeAttribute(t))
+                },
+                applyDirective = (e, t, n, s, r, i) => {
+                    const o = t({
+                        el: e,
+                        get: (t = n) => evaluate(s.scope, t, e),
+                        effect: s.effect,
+                        ctx: s,
+                        exp: n,
+                        arg: r,
+                        modifiers: i
+                    });
+                    o && s.cleanups.push(o)
+                },
+                renderTemplate = (e, t) => {
+                    if ("#" !== t[0]) e.innerHTML = t;
+                    else {
+                        const n = document.querySelector(t);
+                        e.appendChild(n.content.cloneNode(!0))
+                    }
+                },
+                createContext = e => {
+                    const n = {
+                        delimiters: ["{{", "}}"],
+                        delimitersRE: /\{\{([^]+?)\}\}/g,
+                        ...e,
+                        scope: e ? e.scope : reactive({}),
+                        dirs: e ? e.dirs : {},
+                        effects: [],
+                        blocks: [],
+                        cleanups: [],
+                        effect: e => {
+                            if (isOnceActive) return queueJob(e), e;
+                            const s = function (e, n) {
+                                e.effect && (e = e.effect.fn);
+                                const s = new ReactiveEffect(e);
+                                n && (objectAssign(s, n), n.scope && trackEffectInParentContext(s, n.scope)), (!n || !n.lazy) && s.run();
+                                const r = s.run.bind(s);
+                                return r.effect = s, r
+                            }(e, {
+                                scheduler: () => queueJob(s)
+                            });
+                            return n.effects.push(s), s
+                        }
+                    };
+                    return n
+                },
+                createChildContext = (e, t = {}) => {
+                    const n = e.scope,
+                        s = Object.create(n);
+                    Object.defineProperties(s, Object.getOwnPropertyDescriptors(t)), s.$refs = Object.create(n.$refs);
+                    const r = reactive(new Proxy(s, {
+                        set: (e, t, s, i) => i !== r || e.hasOwnProperty(t) ? Reflect.set(e, t, s, i) : Reflect.set(n, t, s)
+                    }));
+                    return bindScopeMethods(r), {
+                        ...e,
+                        scope: r
+                    }
+                },
+                bindScopeMethods = e => {
+                    for (const t of Object.keys(e)) "function" == typeof e[t] && (e[t] = e[t].bind(e))
                 };
-                return app;
-            };
-
-            // Export the xfvue object
-            const currentScript = document.currentScript;
-            if (currentScript && currentScript.hasAttribute("init")) { init().mount(); }
-
-            exports.createApp = init;
-            exports.nextTick = nextTick;
-            exports.reactive = reactive;
-            return exports;
+            class Block {
+                get el() {
+                    return this.start || this.template
+                }
+                constructor(e, t, n = !1) {
+                    this.isFragment = e instanceof HTMLTemplateElement, n ? this.template = e : this.isFragment ? this.template = e.content.cloneNode(!0) : this.template = e.cloneNode(!0), n ? this.ctx = t : (this.parentCtx = t, t.blocks.push(this), this.ctx = createContext(t)), processNode(this.template, this.ctx)
+                }
+                insert(e, t = null) {
+                    if (this.isFragment)
+                        if (this.start) {
+                            let n, s = this.start;
+                            for (; s && (n = s.nextSibling, e.insertBefore(s, t), s !== this.end);) s = n
+                        } else this.start = new Text(""), this.end = new Text(""), e.insertBefore(this.end, t), e.insertBefore(this.start, this.end), e.insertBefore(this.template, this.end);
+                    else e.insertBefore(this.template, t)
+                }
+                remove() {
+                    if (this.parentCtx && ((e, t) => {
+                        const n = e.indexOf(t);
+                        n > -1 && e.splice(n, 1)
+                    })(this.parentCtx.blocks, this), this.start) {
+                        const e = this.start.parentNode;
+                        let t, n = this.start;
+                        for (; n && (t = n.nextSibling, e.removeChild(n), n !== this.end);) n = t
+                    } else this.template.parentNode.removeChild(this.template);
+                    this.teardown()
+                }
+                teardown() {
+                    this.ctx.blocks.forEach((e => {
+                        e.teardown()
+                    })), this.ctx.effects.forEach(stopEffect), this.ctx.cleanups.forEach((e => e()))
+                }
+            }
+            const escapeRegex = e => e.replace(/[-.*+?^${}()|[\]\/\\]/g, "\\$&"),
+                createApp = e => {
+                    const t = createContext();
+                    if (e && (t.scope = reactive(e), bindScopeMethods(t.scope), e.$delimiters)) {
+                        const [n, s] = t.delimiters = e.$delimiters;
+                        t.delimitersRE = new RegExp(escapeRegex(n) + "([^]+?)" + escapeRegex(s), "g")
+                    }
+                    let n;
+                    return t.scope.$s = toString, t.scope.$nextTick = nextTick, t.scope.$refs = Object.create(null), {
+                        directive(e, n) {
+                            return n ? (t.dirs[e] = n, this) : t.dirs[e]
+                        },
+                        mount(e) {
+                            if ("string" == typeof e && !(e = document.querySelector(e))) return;
+                            let s;
+                            return s = (e = e || document.documentElement).hasAttribute("v-scope") ?
+                                [e] : [...e.querySelectorAll("[v-scope]")].filter((e => !e.matches("[v-scope] [v-scope]"))),
+                                s.length || (s = [e]), n = s.map((e => new Block(e, t, !0))), t.scope;
+                        },
+                        unmount() {
+                            n.forEach((e => e.teardown()))
+                        }
+                    }
+                },
+                currentScript = document.currentScript;
+            return currentScript && currentScript.hasAttribute("init") && createApp().mount(),
+                exports.createApp = createApp,
+                exports.nextTick = nextTick,
+                exports.reactive = reactive,
+                exports
         }({});
 
-        var scope = document.getElementById('app');
-        var vz = {
-            msg: "hello xf",
+        // --- Application Initialization ---
+        var appContainer = document.getElementById('app');
+        // Refactored initial data object for clarity
+        var initialData = {
+            message: "hello xf",
             count: 875,
-            s: function () { console.log(this.msg); }
+            selectedValue: 2, // Default selected value for "female"
+            options: [
+                { value: 1, text: "male" },
+                { value: 2, text: "female" },
+                { value: 3, text: "n/a" }
+            ],
+            logMessage: function () { console.log(this.message); }
         };
-        var app = xfvue.createApp(vz).mount(scope);
+        var app = xfvue.createApp(initialData).mount(appContainer);
     </script>
 </body>
 
