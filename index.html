@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="utf-8">
-    <title>xfVUE - Complete & Functional</title>
+    <title>xfVUE - v3.c</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
 
@@ -19,16 +20,38 @@
                 <span data-testid="msg-display">{{message}}</span>
             </div>
             <div>
-                <input type="button" value="Increment Count" v-on:click="count++;logMessage()" v-on:load="console.log('btn loaded')" />
+                <input type="button" value="Increment Count" v-on:click="count++;logMessage()"
+                    v-on:load="console.log('btn loaded')" />
                 <div>{{count}}</div>
-                <input type="number" v-model="count" />
+                <input type="number" v-model="count" v-on:change="clog" />
             </div>
             <div>
-                <p>Select element reactivity:</p>
-                <select v-model="selectedValue">
+                <div>Select Element Reactivity:</div>
+                <select v-model="selectedValue" v-on:change="clog($el)">
                     <option v-for="option in options" v-bind:value="option.value">{{option.text}}</option>
                 </select>
                 <p>Selected value: {{selectedValue}}</p>
+            </div>
+            <div>
+                <div>Time Picker [{{time1int}}] [{{time1}}]</div>
+                <div v-on:mount="time1=timeToStr(time1int)">
+                    <input type="time" v-model="time1" v-on:change="time1int=timeToMins(time1)">
+                </div>
+            </div>
+            <div>
+                <br>
+                <div v-on:mount="function() { console.log('Mounted!');msg2='function ran on:mount'} ">
+                    {{msg2}}
+                </div>
+            </div>
+            <div>
+                <label for="img1" class="form-label cursor-pointer">Select an Image</label>
+                <i v-if="img1" class="bi bi-x" v-on:click="img1=''"></i>
+                <div class="p-2">
+                    <input id="img1" type="file" accept="" v-on:change="file_up_single($el)">
+                </div>
+                <img v-bind:src="file_uri(img1)" class="img-fluid img-thumbnail" />
+                <div>{{img1}}</div>
             </div>
         </div>
     </div>
@@ -151,53 +174,110 @@
 
             class ReactiveEffect {
                 constructor(fn, scheduler = null, context) {
-                    this.fn = fn, this.scheduler = scheduler, this.active = !0, this.deps = [], this.parent = void 0, trackEffectInParentContext(this, context)
+                    this.fn = fn;                     // The reactive function to run
+                    this.scheduler = scheduler;      // Optional scheduler for deferred execution
+                    this.active = true;              // Indicates if the effect is still active
+                    this.deps = [];                  // List of dependencies this effect is tracking
+                    this.parent = undefined;         // Parent effect in nested execution
+
+                    // Register this effect in the provided context (if any)
+                    trackEffectInParentContext(this, context);
                 }
+
                 run() {
+                    // If the effect is inactive, just run the function directly
                     if (!this.active) return this.fn();
-                    let parentEffect = activeEffect,
-                        lastShouldTrack = shouldTrack;
-                    for (; parentEffect;) {
-                        if (parentEffect === this) return;
-                        parentEffect = parentEffect.parent
+
+                    // Prevent recursive execution of the same effect
+                    let current = activeEffect;
+                    const previousShouldTrack = shouldTrack;
+
+                    while (current) {
+                        if (current === this) return;
+                        current = current.parent;
                     }
+
                     try {
-                        return this.parent = activeEffect, activeEffect = this, shouldTrack = !0, trackOpBit = 1 << ++effectStackDepth, effectStackDepth <= 30 ? (({
-                            deps: e
-                        }) => {
-                            if (e.length)
-                                for (let t = 0; t < e.length; t++) e[t].w |= trackOpBit
-                        })(this) : cleanupEffect(this), this.fn()
-                    } finally {
-                        effectStackDepth <= 30 && (effect => {
-                            const {
-                                deps: t
-                            } = effect;
-                            if (t.length) {
-                                let n = 0;
-                                for (let s = 0; s < t.length; s++) {
-                                    const r = t[s];
-                                    wasTracked(r) && !newlyTracked(r) ? r.delete(effect) : t[n++] = r, r.w &= ~trackOpBit, r.n &= ~trackOpBit
-                                }
-                                t.length = n
+                        // Set up tracking context
+                        this.parent = activeEffect;
+                        activeEffect = this;
+                        shouldTrack = true;
+
+                        // Assign a unique bit for this effect in the tracking stack
+                        trackOpBit = 1 << ++effectStackDepth;
+
+                        // If stack depth is within safe bounds, mark dependencies as "was tracked"
+                        if (effectStackDepth <= 30) {
+                            const { deps } = this;
+                            for (let i = 0; i < deps.length; i++) {
+                                deps[i].w |= trackOpBit; // Mark as previously tracked
                             }
-                        })(this), trackOpBit = 1 << --effectStackDepth, activeEffect = this.parent, shouldTrack = lastShouldTrack, this.parent = void 0, this.deferStop && this.stop()
+                        } else {
+                            // If too deep, clean up dependencies instead
+                            cleanupEffect(this);
+                        }
+
+                        // Execute the reactive function
+                        return this.fn();
+                    } finally {
+                        // Finalize tracking and cleanup
+                        if (effectStackDepth <= 30) {
+                            const { deps } = this;
+                            let newDepsIndex = 0;
+
+                            for (let i = 0; i < deps.length; i++) {
+                                const dep = deps[i];
+
+                                // Remove effect from dep if it was tracked but not newly tracked
+                                if (wasTracked(dep) && !newlyTracked(dep)) {
+                                    dep.delete(this);
+                                } else {
+                                    deps[newDepsIndex++] = dep;
+                                }
+
+                                // Clear tracking bits
+                                dep.w &= ~trackOpBit;
+                                dep.n &= ~trackOpBit;
+                            }
+
+                            deps.length = newDepsIndex;
+                        }
+
+                        // Restore previous tracking context
+                        trackOpBit = 1 << --effectStackDepth;
+                        activeEffect = this.parent;
+                        shouldTrack = previousShouldTrack;
+                        this.parent = undefined;
+
+                        // If stop was deferred during execution, stop now
+                        if (this.deferStop) this.stop();
                     }
                 }
+
                 stop() {
-                    activeEffect === this ? this.deferStop = !0 : this.active && (cleanupEffect(this), this.onStop && this.onStop(), this.active = !1)
+                    // If currently running, defer stopping until after execution
+                    if (activeEffect === this) {
+                        this.deferStop = true;
+                    } else if (this.active) {
+                        // Clean up dependencies and mark as inactive
+                        cleanupEffect(this);
+                        if (this.onStop) this.onStop();
+                        this.active = false;
+                    }
                 }
             }
 
-            function cleanupEffect(effect) {
-                const {
-                    deps: t
-                } = effect;
-                if (t.length) {
-                    for (let n = 0; n < t.length; n++) t[n].delete(effect);
-                    t.length = 0
+            function cleanupEffect(reactiveEffect) {
+                const { deps: dependencySets } = reactiveEffect;
+
+                if (dependencySets.length > 0) {
+                    for (let i = 0; i < dependencySets.length; i++) {
+                        dependencySets[i].delete(reactiveEffect);
+                    }
+                    dependencySets.length = 0;
                 }
             }
+
 
             function stopEffect(runner) {
                 runner.effect.stop()
@@ -334,6 +414,8 @@
                     return track(target, isArray(target) ? "length" : ITERATE_KEY), Reflect.ownKeys(target)
                 }
             };
+
+
             const readonlyHandlers = {
                 get: readonlyGet,
                 set: (e, t) => !0,
@@ -408,41 +490,94 @@
 
             // --- Directives Logic & Helpers ---
             const forceEnabledAttrsRegex = /^(spellcheck|draggable|form|list|type)$/;
+
             const bindDirective = ({
-                el: e,
-                get: t,
-                effect: n,
-                arg: s,
-                modifiers: r
+                el: targetElement,
+                get: evaluateBinding,
+                effect: registerReactiveEffect,
+                arg: bindingKey,
+                modifiers: bindingModifiers
             }) => {
-                let i;
-                "class" === s && (e._class = e.className), n((() => {
-                    let n = t();
-                    if (s) null != r && r.camel && (s = camelize(s)), applyBinding(e, s, n, i);
-                    else {
-                        for (const t in n) applyBinding(e, t, n[t], i && i[t]);
-                        for (const t in i) (!n || !(t in n)) && applyBinding(e, t, null)
-                    }
-                    i = n
-                }))
-            };
-            const applyBinding = (e, t, n, s) => {
-                if ("class" === t) e.setAttribute("class", normalizeClass(e._class ? [e._class, n] : n) || "");
-                else if ("style" === t) {
-                    n = normalizeStyle(n);
-                    const {
-                        style: t
-                    } = e;
-                    if (n)
-                        if (isString(n)) n !== s && (t.cssText = n);
-                        else {
-                            for (const e in n) setStyleProperty(t, e, n[e]);
-                            if (s && !isString(s))
-                                for (const e in s) null == n[e] && setStyleProperty(t, e, "")
+                let previousValue;
+
+                if (bindingKey === "class") {
+                    targetElement._class = targetElement.className;
+                }
+
+                registerReactiveEffect(() => {
+                    let currentValue = evaluateBinding();
+
+                    if (bindingKey) {
+                        if (bindingModifiers?.camel) {
+                            bindingKey = camelize(bindingKey);
                         }
-                    else e.removeAttribute("style")
-                } else e instanceof SVGElement || !(t in e) || forceEnabledAttrsRegex.test(t) ? "true-value" === t ? e._trueValue = n : "false-value" === t ? e._falseValue = n : null != n ? e.setAttribute(t, n) : e.removeAttribute(t) : (e[t] = n, "value" === t && (e._value = n))
+                        applyBinding(targetElement, bindingKey, currentValue, previousValue);
+                    } else {
+                        for (const key in currentValue) {
+                            applyBinding(targetElement, key, currentValue[key], previousValue && previousValue[key]);
+                        }
+                        for (const key in previousValue) {
+                            if (!currentValue || !(key in currentValue)) {
+                                applyBinding(targetElement, key, null);
+                            }
+                        }
+                    }
+
+                    previousValue = currentValue;
+                });
             };
+
+            const applyBinding = (element, key, newValue, oldValue) => {
+                if (key === "class") {
+                    const normalizedClass = normalizeClass(element._class ? [element._class, newValue] : newValue);
+                    element.setAttribute("class", normalizedClass || "");
+                } else if (key === "style") {
+                    newValue = normalizeStyle(newValue);
+                    const { style } = element;
+
+                    if (newValue) {
+                        if (isString(newValue)) {
+                            if (newValue !== oldValue) {
+                                style.cssText = newValue;
+                            }
+                        } else {
+                            for (const prop in newValue) {
+                                setStyleProperty(style, prop, newValue[prop]);
+                            }
+                            if (oldValue && !isString(oldValue)) {
+                                for (const prop in oldValue) {
+                                    if (newValue[prop] == null) {
+                                        setStyleProperty(style, prop, "");
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        element.removeAttribute("style");
+                    }
+                } else {
+                    const isSpecialAttr = element instanceof SVGElement || !(key in element) || forceEnabledAttrsRegex.test(key);
+
+                    if (isSpecialAttr) {
+                        if (key === "true-value") {
+                            element._trueValue = newValue;
+                        } else if (key === "false-value") {
+                            element._falseValue = newValue;
+                        } else if (newValue != null) {
+                            element.setAttribute(key, newValue);
+                        } else {
+                            element.removeAttribute(key);
+                        }
+                    } else {
+                        element[key] = newValue;
+                        if (key === "value") {
+                            element._value = newValue;
+                        }
+                    }
+                }
+            };
+
+
             const importantRegex = /\s*!important$/;
             const setStyleProperty = (e, t, n) => {
                 isArray(n) ? n.forEach((n => setStyleProperty(e, t, n))) : t.startsWith("--") ? e.setProperty(t, n) : importantRegex.test(n) ? e.setProperty(hyphenate(t), n.replace(importantRegex, ""), "important") : e[t] = n
@@ -455,6 +590,7 @@
                 e.addEventListener(t, n, s)
             };
             const simplePathRE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\['[^']*?']|\["[^"]*?"]|\[\d+]|\[[A-Za-z_$][\w$]*])*$/;
+
             const modifierKeys = ["ctrl", "shift", "alt", "meta"];
             const eventModifiers = {
                 stop: e => e.stopPropagation(),
@@ -469,27 +605,43 @@
                 right: e => "button" in e && 2 !== e.button,
                 exact: (e, t) => modifierKeys.some((n => e[`${n}Key`] && !t[n]))
             };
-            const onDirective = ({ el: e, get: t, exp: n, arg: s, modifiers: r }) => {
-                if (!s) return;
-                let i = simplePathRE.test(n) ? t(`(e => ${n}(e))`) : t(`($event => { ${n} })`);
-                if ("mount" !== s) {
-                    if ("unmount" === s) return () => i();
-                    if (r) {
-                        "click" === s && (r.right && (s = "contextmenu"), r.middle && (s = "mouseup"));
-                        const e = i;
-                        i = t => {
-                            if (!("key" in t) || hyphenate(t.key) in r) {
-                                for (const e in r) {
-                                    const n = eventModifiers[e];
-                                    if (n && n(t, r)) return
-                                }
-                                return e(t)
+
+
+            const onDirective = ({ el, get, exp, arg, modifiers }) => {
+                if (!arg) return;
+                let handler;
+                const isInlineFunction = exp.trim().startsWith("() =>") || exp.trim().startsWith("function");
+                if (arg === "mount") {
+                    handler = isInlineFunction ? get(exp) : get(`() => { ${exp} }`);
+                    nextTick(() => handler());
+                    return;
+                }
+
+                // Determine the correct handler based on the expression type
+                const rawHandler = isInlineFunction
+                    ? get(exp)
+                    : simplePathRE.test(exp)
+                        ? get(`(e) => ${exp}(e)`)
+                        : get(`(e) => { ${exp} }`);
+
+                if (modifiers) {
+                    if (arg === "click" && modifiers.right) arg = "contextmenu";
+                    if (arg === "click" && modifiers.middle) arg = "mouseup";
+                    handler = (event) => {
+                        if (!("key" in event) || hyphenate(event.key) in modifiers) {
+                            for (const key in modifiers) {
+                                const mod = eventModifiers[key];
+                                if (mod && mod(event, modifiers)) return;
                             }
+                            return rawHandler(event);
                         }
-                    }
-                    addEventListener(e, s, i, r)
-                } else nextTick(i)
+                    };
+                } else {
+                    handler = rawHandler;
+                }
+                el.addEventListener(arg, handler, modifiers);
             };
+
             const textDirective = ({ el: e, get: t, effect: n }) => {
                 n((() => {
                     e.textContent = toString(t())
@@ -529,6 +681,8 @@
                     return console.error(`${t.message} in expression: ${e}`), () => { }
                 }
             };
+
+            //directives
             const directives = {
                 bind: bindDirective,
                 on: onDirective,
@@ -630,176 +784,334 @@
                     nextTick((() => s((() => evaluateAndCache(t.scope, n, e)))))
                 }
             };
+
+
             const forRegex = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
             const forAliasRegex = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
             const forParensRegex = /^\(|\)$/g;
             const forDestructureRegex = /^[{[]\s*((?:[\w_$]+\s*,?\s*)+)[\]}]$/;
-            const forDirective = (e, t, n) => {
-                const s = t.match(forRegex);
-                if (!s) return;
-                const i = e.nextSibling,
-                    o = e.parentElement,
-                    c = new Text("");
-                o.insertBefore(c, e), o.removeChild(e);
-                const l = s[2].trim();
-                let u, a, p, h, d = s[1].trim().replace(forParensRegex, "").trim(),
-                    m = !1,
-                    g = "key",
-                    v = e.getAttribute(g) || e.getAttribute(g = ":key") || e.getAttribute(g = "v-bind:key");
-                v && (e.removeAttribute(g), "key" === g && (v = JSON.stringify(v))), (h = d.match(forAliasRegex)) && (d = d.replace(forAliasRegex, "").trim(), a = h[1].trim(), h[2] && (p = h[2].trim())), (h = d.match(forDestructureRegex)) && (u = h[1].split(",").map((e => e.trim())), m = "[" === d[0]);
-                let y, b, _, w = !1;
-                const x = (e, t, s, r) => {
-                    const i = {};
-                    u ? u.forEach(((e, n) => i[e] = t[m ? n : e])) : i[d] = t, r ? (a && (i[a] = r), p && (i[p] = s)) : a && (i[a] = s);
-                    const o = createChildContext(n, i),
-                        c = v ? evaluate(o.scope, v) : s;
-                    return e.set(c, s), o.key = c, o
-                },
-                    $ = (t, n) => {
-                        const s = new Block(e, t);
-                        return s.key = t.key, s.insert(o, n), s
-                    };
-                return n.effect((() => {
-                    const e = evaluate(n.scope, l),
-                        t = _;
-                    if ([b, _] = (e => {
-                        const t = new Map,
-                            n = [];
-                        if (isArray(e))
-                            for (let s = 0; s < e.length; s++) n.push(x(t, e[s], s));
-                        else if ("number" == typeof e)
-                            for (let s = 0; s < e; s++) n.push(x(t, s + 1, s));
-                        else if (isObject(e)) {
-                            let s = 0;
-                            for (const r in e) n.push(x(t, e[r], s++, r))
-                        }
-                        return [n, t]
-                    })(e), w) {
-                        for (let t = 0; t < y.length; t++) _.has(y[t].key) || y[t].remove();
-                        const e = [];
-                        let n, s, r = b.length;
-                        for (; r--;) {
-                            const i = b[r],
-                                l = t.get(i.key);
-                            let f;
-                            null == l ? f = $(i, n ? n.el : c) : (f = y[l], Object.assign(f.ctx.scope, i.scope), l !== r && (y[l + 1] !== n || s === n) && (s = f, f.insert(o, n ? n.el : c))), e.unshift(n = f)
-                        }
-                        y = e
-                    } else y = b.map((e => $(e, c))), w = !0
-                })), i
-            };
-            const refDirective = ({
-                el: e,
-                ctx: {
-                    scope: {
-                        $refs: t
-                    }
-                },
-                get: n,
-                effect: s
-            }) => {
-                let r;
-                return s((() => {
-                    const s = n();
-                    t[s] = e, r && s !== r && delete t[r], r = s
-                })), () => {
-                    r && delete t[r]
+
+            const forDirective = (templateEl, expression, context) => {
+                const match = expression.match(/([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/);
+                if (!match) return;
+
+                const aliasRaw = match[1].trim().replace(/^\(|\)$/g, "").trim();
+                const sourceExp = match[2].trim();
+
+                const parentEl = templateEl.parentElement;
+                const anchor = new Text("");
+                parentEl.insertBefore(anchor, templateEl);
+                parentEl.removeChild(templateEl);
+
+                let itemAlias = aliasRaw;
+                let indexAlias = null;
+                let keyAlias = null;
+
+                const aliasMatch = aliasRaw.match(/,([^,\}\]]*)(?:,([^,\}\]]*))?$/);
+                if (aliasMatch) {
+                    itemAlias = aliasRaw.replace(/,([^,\}\]]*)(?:,([^,\}\]]*))?$/, "").trim();
+                    indexAlias = aliasMatch[1].trim();
+                    keyAlias = aliasMatch[2] ? aliasMatch[2].trim() : null;
                 }
+
+                const isDestructured = /^[{[]\s*((?:[\w_$]+\s*,?\s*)+)[\]}]$/.test(itemAlias);
+                const destructuredKeys = isDestructured ? itemAlias.replace(/^[{[]|[\]}]$/g, "").split(",").map(k => k.trim()) : null;
+
+                const keyAttr = templateEl.getAttribute("key") ||
+                    templateEl.getAttribute(":key") ||
+                    templateEl.getAttribute("v-bind:key");
+
+                if (keyAttr) templateEl.removeAttribute("key");
+
+                let previousBlocks = [];
+                let initialized = false;
+
+                const createScope = (value, index, key) => {
+                    const scopeVars = {};
+
+                    if (destructuredKeys) {
+                        destructuredKeys.forEach((k, i) => scopeVars[k] = value[i]);
+                    } else {
+                        scopeVars[itemAlias] = value;
+                    }
+
+                    if (indexAlias) scopeVars[indexAlias] = index;
+                    if (keyAlias) scopeVars[keyAlias] = key;
+
+                    const childContext = createChildContext(context, scopeVars);
+                    const blockKey = keyAttr ? evaluate(childContext.scope, keyAttr) : index;
+                    childContext.key = blockKey;
+
+                    return { context: childContext, key: blockKey };
+                };
+
+                const renderBlock = (scopeObj, insertBeforeEl) => {
+                    const block = new Block(templateEl, scopeObj.context);
+                    block.key = scopeObj.key;
+                    block.insert(parentEl, insertBeforeEl);
+                    return block;
+                };
+
+                context.effect(() => {
+                    const source = evaluate(context.scope, sourceExp);
+                    const newBlocksMap = new Map();
+                    const newScopes = [];
+
+                    if (Array.isArray(source)) {
+                        source.forEach((item, index) => {
+                            const scopeObj = createScope(item, index);
+                            newScopes.push(scopeObj);
+                            newBlocksMap.set(scopeObj.key, scopeObj);
+                        });
+                    } else if (typeof source === "number") {
+                        for (let i = 0; i < source; i++) {
+                            const scopeObj = createScope(i + 1, i);
+                            newScopes.push(scopeObj);
+                            newBlocksMap.set(scopeObj.key, scopeObj);
+                        }
+                    } else if (typeof source === "object") {
+                        let index = 0;
+                        for (const key in source) {
+                            const scopeObj = createScope(source[key], index++, key);
+                            newScopes.push(scopeObj);
+                            newBlocksMap.set(scopeObj.key, scopeObj);
+                        }
+                    }
+
+                    if (initialized) {
+                        // Remove blocks no longer present
+                        previousBlocks.forEach(block => {
+                            if (!newBlocksMap.has(block.key)) block.remove();
+                        });
+
+                        // Reorder or update blocks
+                        const updatedBlocks = [];
+                        let nextEl = anchor;
+                        for (let i = newScopes.length - 1; i >= 0; i--) {
+                            const scopeObj = newScopes[i];
+                            const existingIndex = previousBlocks.findIndex(b => b.key === scopeObj.key);
+                            let block;
+
+                            if (existingIndex === -1) {
+                                block = renderBlock(scopeObj, nextEl);
+                            } else {
+                                block = previousBlocks[existingIndex];
+                                Object.assign(block.ctx.scope, scopeObj.context.scope);
+                                if (previousBlocks[existingIndex + 1] !== nextEl) {
+                                    block.insert(parentEl, nextEl);
+                                }
+                            }
+
+                            updatedBlocks.unshift(block);
+                            nextEl = block.el;
+                        }
+
+                        previousBlocks = updatedBlocks;
+                    } else {
+                        previousBlocks = newScopes.map(scopeObj => renderBlock(scopeObj, anchor));
+                        initialized = true;
+                    }
+                });
+
+                return templateEl.nextSibling;
             };
+
+            const refDirective = ({ el, ctx, get, effect }) => {
+                const refs = ctx.scope.$refs;
+                let previousRefName;
+                // Reactive effect to track ref name changes
+                const stopEffect = effect(() => {
+                    const currentRefName = get();
+                    // Assign the element to the current ref name
+                    refs[currentRefName] = el;
+                    // Clean up the previous ref if the name changed
+                    if (previousRefName && currentRefName !== previousRefName) { delete refs[previousRefName]; }
+                    previousRefName = currentRefName;
+                });
+                // Cleanup function to remove the ref when unmounted
+                return () => { if (previousRefName) { delete refs[previousRefName]; } };
+            };
+
             const directivePrefixRegex = /^(?:v-|:|@)/;
             const modifierRegex = /\.([\w-]+)/g;
             let isOnceActive = !1;
+
+
             const processNode = (e, t) => {
-                const n = e.nodeType;
-                if (1 === n) {
-                    const n = e;
-                    if (n.hasAttribute("v-pre")) return;
-                    let s;
-                    if (getAndRemoveAttr(n, "v-cloak"), s = getAndRemoveAttr(n, "v-if")) return ((e, t, n) => {
-                        const s = e.parentElement,
-                            r = new Comment("v-if");
-                        s.insertBefore(r, e);
-                        const i = [{
-                            exp: t,
-                            el: e
-                        }];
-                        let o, c;
-                        for (;
-                            (o = e.nextElementSibling) && (c = null, "" === getAndRemoveAttr(o, "v-else") || (c = getAndRemoveAttr(o, "v-else-if")));) s.removeChild(o), i.push({
-                                exp: c,
-                                el: o
-                            });
-                        const l = e.nextSibling;
-                        s.removeChild(e);
-                        let f, u = -1;
-                        const a = () => {
-                            f && (s.insertBefore(r, f.el), f.remove(), f = void 0)
-                        };
-                        return n.effect((() => {
-                            for (let e = 0; e < i.length; e++) {
-                                const {
-                                    exp: t,
-                                    el: o
-                                } = i[e];
-                                if (!t || evaluate(n.scope, t)) return void (e !== u && (a(), f = new Block(o, n), f.insert(s, r), s.removeChild(r), u = e))
+                const nodeType = e.nodeType;
+                if (nodeType === 1) {
+                    const element = e;
+                    if (element.hasAttribute("v-pre")) return;
+
+                    let directiveValue;
+
+                    getAndRemoveAttr(element, "v-cloak");
+                    directiveValue = getAndRemoveAttr(element, "v-if");
+                    if (directiveValue) {
+                        return ((el, expr, ctx) => {
+                            const parent = el.parentElement;
+                            const anchor = new Comment("v-if");
+                            parent.insertBefore(anchor, el);
+
+                            const branches = [{ exp: expr, el }];
+                            let sibling, condition;
+
+                            while (
+                                (sibling = el.nextElementSibling) &&
+                                (condition = null, getAndRemoveAttr(sibling, "v-else") === "" || (condition = getAndRemoveAttr(sibling, "v-else-if")))
+                            ) {
+                                parent.removeChild(sibling);
+                                branches.push({ exp: condition, el: sibling });
                             }
-                            u = -1, a()
-                        })), l
-                    })(n, s, t);
-                    if (s = getAndRemoveAttr(n, "v-for")) return forDirective(n, s, t);
-                    if ((s = getAndRemoveAttr(n, "v-scope")) || "" === s) {
-                        const e = s ? evaluate(t.scope, s) : {};
-                        t = createChildContext(t, e), e.$template && renderTemplate(n, e.$template)
+
+                            const nextNode = el.nextSibling;
+                            parent.removeChild(el);
+
+                            let activeBlock, activeIndex = -1;
+
+                            const clearBlock = () => {
+                                if (activeBlock) {
+                                    parent.insertBefore(anchor, activeBlock.el);
+                                    activeBlock.remove();
+                                    activeBlock = undefined;
+                                }
+                            };
+
+                            ctx.effect(() => {
+                                for (let i = 0; i < branches.length; i++) {
+                                    const { exp, el } = branches[i];
+                                    if (!exp || evaluate(ctx.scope, exp)) {
+                                        if (i !== activeIndex) {
+                                            clearBlock();
+                                            activeBlock = new Block(el, ctx);
+                                            activeBlock.insert(parent, anchor);
+                                            parent.removeChild(anchor);
+                                            activeIndex = i;
+                                        }
+                                        return;
+                                    }
+                                }
+                                activeIndex = -1;
+                                clearBlock();
+                            });
+
+                            return nextNode;
+                        })(element, directiveValue, t);
                     }
-                    const r = null != getAndRemoveAttr(n, "v-once");
-                    r && (isOnceActive = !0), (s = getAndRemoveAttr(n, "ref")) && applyDirective(n, refDirective, `"${s}"`, t), walkChildren(n, t);
-                    const i = [];
-                    for (const {
-                        name: e,
-                        value: o
+
+                    directiveValue = getAndRemoveAttr(element, "v-for");
+                    if (directiveValue) return forDirective(element, directiveValue, t);
+
+                    directiveValue = getAndRemoveAttr(element, "v-scope");
+                    if (directiveValue || directiveValue === "") {
+                        const scopeData = directiveValue ? evaluate(t.scope, directiveValue) : {};
+                        t = createChildContext(t, scopeData);
+                        if (scopeData.$template) renderTemplate(element, scopeData.$template);
                     }
-                        of [...n.attributes]) directivePrefixRegex.test(e) && "v-cloak" !== e && ("v-model" === e ? i.unshift([e, o]) : "@" === e[0] || /^v-on\b/.test(e) ? i.push([e, o]) : processSingleDirective(n, e, o, t));
-                    for (const [e, o] of i) processSingleDirective(n, e, o, t);
-                    r && (isOnceActive = !1)
-                } else if (3 === n) {
-                    const n = e.data;
-                    if (n.includes(t.delimiters[0])) {
-                        let s, r = [],
-                            i = 0;
-                        for (; s = t.delimitersRE.exec(n);) {
-                            const e = n.slice(i, s.index);
-                            e && r.push(JSON.stringify(e)), r.push(`$s(${s[1]})`), i = s.index + s[0].length
+
+                    const isOnce = getAndRemoveAttr(element, "v-once") != null;
+                    if (isOnce) isOnceActive = true;
+
+                    directiveValue = getAndRemoveAttr(element, "ref");
+                    if (directiveValue) applyDirective(element, refDirective, `"${directiveValue}"`, t);
+
+                    walkChildren(element, t);
+
+                    const directiveQueue = [];
+                    for (const { name, value } of [...element.attributes]) {
+                        if (directivePrefixRegex.test(name) && name !== "v-cloak") {
+                            if (name === "v-model") directiveQueue.unshift([name, value]);
+                            else if (name[0] === "@" || /^v-on\b/.test(name)) directiveQueue.push([name, value]);
+                            else processSingleDirective(element, name, value, t);
                         }
-                        i < n.length && r.push(JSON.stringify(n.slice(i))), applyDirective(e, textDirective, r.join("+"), t)
                     }
-                } else 11 === n && walkChildren(e, t)
+                    for (const [name, value] of directiveQueue) {
+                        processSingleDirective(element, name, value, t);
+                    }
+                    if (isOnce) isOnceActive = false;
+
+                } else if (nodeType === 3) {
+                    const textContent = e.data;
+                    if (textContent.includes(t.delimiters[0])) {
+                        let match;
+                        const tokens = [];
+                        let lastIndex = 0;
+
+                        while ((match = t.delimitersRE.exec(textContent))) {
+                            const staticText = textContent.slice(lastIndex, match.index);
+                            if (staticText) tokens.push(JSON.stringify(staticText));
+                            tokens.push(`$s(${match[1]})`);
+                            lastIndex = match.index + match[0].length;
+                        }
+
+                        if (lastIndex < textContent.length) {
+                            tokens.push(JSON.stringify(textContent.slice(lastIndex)));
+                        }
+
+                        applyDirective(e, textDirective, tokens.join("+"), t);
+                    }
+
+                } else if (nodeType === 11) {
+                    walkChildren(e, t);
+                }
             },
                 walkChildren = (e, t) => {
                     let n = e.firstChild;
                     for (; n;) n = processNode(n, t) || n.nextSibling
                 },
-                processSingleDirective = (e, t, n, s) => {
-                    let r, i, o;
-                    if (":" === (t = t.replace(modifierRegex, ((e, t) => ((o || (o = {}))[t] = !0, ""))))[0]) r = bindDirective, i = t.slice(1);
-                    else if ("@" === t[0]) r = onDirective, i = t.slice(1);
-                    else {
-                        const e = t.indexOf(":"),
-                            n = e > 0 ? t.slice(2, e) : t.slice(2);
-                        r = directives[n] || s.dirs[n], i = e > 0 ? t.slice(e + 1) : void 0
-                    }
-                    r && (r === bindDirective && "ref" === i && (r = refDirective), applyDirective(e, r, n, s, i, o), e.removeAttribute(t))
-                },
-                applyDirective = (e, t, n, s, r, i) => {
-                    const o = t({
-                        el: e,
-                        get: (t = n) => evaluate(s.scope, t, e),
-                        effect: s.effect,
-                        ctx: s,
-                        exp: n,
-                        arg: r,
-                        modifiers: i
+                processSingleDirective = (element, rawName, expression, context) => {
+                    let directiveFn;
+                    let argument;
+                    let modifiers = {};
+
+                    // Extract modifiers (e.g., .stop, .camel) and clean the directive name
+                    const cleanedName = rawName.replace(modifierRegex, (_, mod) => {
+                        modifiers[mod] = true;
+                        return "";
                     });
-                    o && s.cleanups.push(o)
+
+                    // Determine directive type
+                    if (cleanedName.startsWith(":")) {
+                        directiveFn = bindDirective;
+                        argument = cleanedName.slice(1);
+                    } else if (cleanedName.startsWith("@")) {
+                        directiveFn = onDirective;
+                        argument = cleanedName.slice(1);
+                    } else {
+                        const colonIndex = cleanedName.indexOf(":");
+                        const directiveName = colonIndex > 0
+                            ? cleanedName.slice(2, colonIndex)
+                            : cleanedName.slice(2);
+                        argument = colonIndex > 0 ? cleanedName.slice(colonIndex + 1) : undefined;
+                        directiveFn = directives[directiveName] || context.dirs[directiveName];
+                    }
+
+                    // Special case: v-bind:ref → refDirective
+                    if (directiveFn === bindDirective && argument === "ref") {
+                        directiveFn = refDirective;
+                    }
+
+                    // Apply the directive if found
+                    if (directiveFn) {
+                        applyDirective(element, directiveFn, expression, context, argument, modifiers);
+                        element.removeAttribute(rawName);
+                    }
+
+                },
+                applyDirective = (element, directiveFn, expression, context, argument, modifiers) => {
+                    const cleanupFn = directiveFn({
+                        el: element,
+                        get: (exp = expression) => evaluate(context.scope, exp, element),
+                        effect: context.effect,
+                        ctx: context,
+                        exp: expression,
+                        arg: argument,
+                        modifiers
+                    });
+
+                    if (cleanupFn) {
+                        context.cleanups.push(cleanupFn);
+                    }
                 },
                 renderTemplate = (e, t) => {
                     if ("#" !== t[0]) e.innerHTML = t;
@@ -808,32 +1120,56 @@
                         e.appendChild(n.content.cloneNode(!0))
                     }
                 },
-                createContext = e => {
-                    const n = {
+                createContext = (options = {}) => {
+                    const context = {
                         delimiters: ["{{", "}}"],
                         delimitersRE: /\{\{([^]+?)\}\}/g,
-                        ...e,
-                        scope: e ? e.scope : reactive({}),
-                        dirs: e ? e.dirs : {},
+                        ...options,
+                        scope: options.scope || reactive({}),
+                        dirs: options.dirs || {},
                         effects: [],
                         blocks: [],
                         cleanups: [],
-                        effect: e => {
-                            if (isOnceActive) return queueJob(e), e;
-                            const s = function (e, n) {
-                                e.effect && (e = e.effect.fn);
-                                const s = new ReactiveEffect(e);
-                                n && (objectAssign(s, n), n.scope && trackEffectInParentContext(s, n.scope)), (!n || !n.lazy) && s.run();
-                                const r = s.run.bind(s);
-                                return r.effect = s, r
-                            }(e, {
-                                scheduler: () => queueJob(s)
-                            });
-                            return n.effects.push(s), s
+                        effect: (fn) => {
+                            if (isOnceActive) {
+                                queueJob(fn);
+                                return fn;
+                            }
+
+                            const wrappedEffect = (() => {
+                                if (fn.effect) fn = fn.effect.fn;
+
+                                const reactiveEffect = new ReactiveEffect(fn);
+
+                                const effectOptions = {
+                                    scheduler: () => queueJob(runner)
+                                };
+
+                                Object.assign(reactiveEffect, effectOptions);
+
+                                if (options.scope) {
+                                    trackEffectInParentContext(reactiveEffect, options.scope);
+                                }
+
+                                if (!effectOptions.lazy) {
+                                    reactiveEffect.run();
+                                }
+
+                                const runner = reactiveEffect.run.bind(reactiveEffect);
+                                runner.effect = reactiveEffect;
+
+                                return runner;
+                            })();
+
+                            context.effects.push(wrappedEffect);
+                            return wrappedEffect;
                         }
                     };
-                    return n
+
+                    return context;
                 },
+
+
                 createChildContext = (e, t = {}) => {
                     const n = e.scope,
                         s = Object.create(n);
@@ -849,38 +1185,104 @@
                 bindScopeMethods = e => {
                     for (const t of Object.keys(e)) "function" == typeof e[t] && (e[t] = e[t].bind(e))
                 };
+
+
+
+
+
             class Block {
                 get el() {
-                    return this.start || this.template
+                    return this.startNode || this.template;
                 }
-                constructor(e, t, n = !1) {
-                    this.isFragment = e instanceof HTMLTemplateElement, n ? this.template = e : this.isFragment ? this.template = e.content.cloneNode(!0) : this.template = e.cloneNode(!0), n ? this.ctx = t : (this.parentCtx = t, t.blocks.push(this), this.ctx = createContext(t)), processNode(this.template, this.ctx)
+
+                constructor(sourceNode, contextOrParent, isRaw = false) {
+                    this.isFragment = sourceNode instanceof HTMLTemplateElement;
+
+                    // Clone the template or raw node
+                    if (isRaw) {
+                        this.template = sourceNode;
+                    } else if (this.isFragment) {
+                        this.template = sourceNode.content.cloneNode(true);
+                    } else {
+                        this.template = sourceNode.cloneNode(true);
+                    }
+
+                    // Context setup
+                    if (isRaw) {
+                        this.context = contextOrParent;
+                    } else {
+                        this.parentContext = contextOrParent;
+                        contextOrParent.blocks.push(this);
+                        this.context = createContext(contextOrParent);
+                    }
+
+                    // Process the template with the context
+                    processNode(this.template, this.context);
+
+                    // Fragment markers
+                    this.startNode = null;
+                    this.endNode = null;
                 }
-                insert(e, t = null) {
-                    if (this.isFragment)
-                        if (this.start) {
-                            let n, s = this.start;
-                            for (; s && (n = s.nextSibling, e.insertBefore(s, t), s !== this.end);) s = n
-                        } else this.start = new Text(""), this.end = new Text(""), e.insertBefore(this.end, t), e.insertBefore(this.start, this.end), e.insertBefore(this.template, this.end);
-                    else e.insertBefore(this.template, t)
+
+                insert(parentNode, anchorNode = null) {
+                    if (this.isFragment) {
+                        if (this.startNode) {
+                            // Re-insert existing fragment
+                            let current = this.startNode;
+                            while (current) {
+                                const next = current.nextSibling;
+                                parentNode.insertBefore(current, anchorNode);
+                                if (current === this.endNode) break;
+                                current = next;
+                            }
+                        } else {
+                            // First-time fragment insertion
+                            this.startNode = new Text("");
+                            this.endNode = new Text("");
+
+                            parentNode.insertBefore(this.endNode, anchorNode);
+                            parentNode.insertBefore(this.startNode, this.endNode);
+                            parentNode.insertBefore(this.template, this.endNode);
+                        }
+                    } else {
+                        parentNode.insertBefore(this.template, anchorNode);
+                    }
                 }
+
                 remove() {
-                    if (this.parentCtx && ((e, t) => {
-                        const n = e.indexOf(t);
-                        n > -1 && e.splice(n, 1)
-                    })(this.parentCtx.blocks, this), this.start) {
-                        const e = this.start.parentNode;
-                        let t, n = this.start;
-                        for (; n && (t = n.nextSibling, e.removeChild(n), n !== this.end);) n = t
-                    } else this.template.parentNode.removeChild(this.template);
-                    this.teardown()
+                    // Remove from parent context's block list
+                    if (this.parentContext) {
+                        const index = this.parentContext.blocks.indexOf(this);
+                        if (index > -1) {
+                            this.parentContext.blocks.splice(index, 1);
+                        }
+                    }
+
+                    // Remove DOM nodes
+                    if (this.startNode) {
+                        const parent = this.startNode.parentNode;
+                        let current = this.startNode;
+                        while (current) {
+                            const next = current.nextSibling;
+                            parent.removeChild(current);
+                            if (current === this.endNode) break;
+                            current = next;
+                        }
+                    } else if (this.template.parentNode) {
+                        this.template.parentNode.removeChild(this.template);
+                    }
+
+                    this.teardown();
                 }
+
                 teardown() {
-                    this.ctx.blocks.forEach((e => {
-                        e.teardown()
-                    })), this.ctx.effects.forEach(stopEffect), this.ctx.cleanups.forEach((e => e()))
+                    this.context.blocks.forEach(block => block.teardown());
+                    this.context.effects.forEach(stopEffect);
+                    this.context.cleanups.forEach(cleanup => cleanup());
                 }
             }
+
+
             const escapeRegex = e => e.replace(/[-.*+?^${}()|[\]\/\\]/g, "\\$&"),
                 createApp = e => {
                     const t = createContext();
@@ -913,11 +1315,27 @@
                 exports
         }({});
 
+        var state = {};
+        function timeToMin(t) { var a = t.split(':'); return parseInt(a[0] + a[1]); };
+        function clog(a) { console.log(a); };
+
+        function file_up_single(el) {
+            const file = el.files?.[0]; if (!file) return;
+            const reader = new FileReader(); const id = el.id;
+            reader.onload = e => { state[id] = e.target.result; };
+            reader.readAsDataURL(file);
+        };
+
+        function file_uri(uri) {
+            return !uri ? '' : uri.startsWith('data:') ? uri : `${window.location.origin}/files/${uri}`;
+        };
+
         // --- Application Initialization ---
         var appContainer = document.getElementById('app');
-        // initial data object for testing
+        // Refactored initial data object for clarity
         var initialData = {
-            message: "hello xf",
+            message: "hello xf", msg2: "hello", img1: "",
+            time1: "12:50", time1int: 1250,
             count: 875,
             selectedValue: 2, // Default selected value for "female"
             options: [
@@ -925,9 +1343,15 @@
                 { value: 2, text: "female" },
                 { value: 3, text: "n/a" }
             ],
+            timeToStr: function (t) { if (!t) { return "00:00"; } var ts = t.toString().padStart(4, '0'); return ts.substr(0, 2) + ':' + ts.substr(2, 2); },
+            timeToMins: function (t) { var a = t.split(':'); return parseInt(a[0] + a[1]); },
             logMessage: function () { console.log(this.message); }
         };
-        var app = xfvue.createApp(initialData).mount(appContainer);
+
+        state = xfvue.createApp(initialData).mount(appContainer);
+
+
+
     </script>
 </body>
 
