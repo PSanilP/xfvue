@@ -2,12 +2,18 @@
 
 Use `v-on:mount` and `v-on:unmount` for lifecycle events:
 
+It can run functions as well!
+
 ```html
 <div
   v-if="show"
-  @vue:mounted="console.log('mounted on: ', $el)"
-  @vue:unmounted="console.log('unmounted: ', $el)"
+  v-on:mount="console.log('mounted on: ', $el)"
+  v-on:unmount="console.log('unmounted: ', $el)"
 ></div>
+
+<div v-on:mount="function() { console.log('Mounted!');msg2='function ran on:mount'} ">
+  {{msg2}}
+</div>
 ```
 
 ### `v-effect`
