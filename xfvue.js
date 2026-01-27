@@ -1,4 +1,4 @@
-﻿//hariOm
+//hariOm
 var xfvue = function (exports) {
     "use strict";
 
@@ -549,6 +549,7 @@ var xfvue = function (exports) {
     };
 
 
+ 
     const onDirective = ({ el, get, exp, arg, modifiers }) => {
         if (!arg) return;
         let handler;
@@ -558,8 +559,6 @@ var xfvue = function (exports) {
             nextTick(() => handler());
             return;
         }
-
-        // Determine the correct handler based on the expression type
         const rawHandler = isInlineFunction
             ? get(exp)
             : simplePathRE.test(exp)
@@ -569,8 +568,10 @@ var xfvue = function (exports) {
         if (modifiers) {
             if (arg === "click" && modifiers.right) arg = "contextmenu";
             if (arg === "click" && modifiers.middle) arg = "mouseup";
+
             handler = (event) => {
-                if (!("key" in event) || hyphenate(event.key) in modifiers) {
+                const hasKeyModifiers = "key" in event && Object.keys(modifiers).some(k => !eventModifiers[k]);
+                if (!("key" in event) || !hasKeyModifiers || hyphenate(event.key) in modifiers) {
                     for (const key in modifiers) {
                         const mod = eventModifiers[key];
                         if (mod && mod(event, modifiers)) return;
@@ -583,6 +584,7 @@ var xfvue = function (exports) {
         }
         el.addEventListener(arg, handler, modifiers);
     };
+   
 
     const textDirective = ({ el: e, get: t, effect: n }) => {
         n((() => {
